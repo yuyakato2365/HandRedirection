@@ -38,3 +38,7 @@ HandRedirection/
 **/*_Data/
 **/*_BurstDebugInformation_DoNotShip/
 
+
+# OpenCVForUnity WebGL plugins (not used)
+Assets/OpenCVForUnity/Plugins/WebGL/
+
