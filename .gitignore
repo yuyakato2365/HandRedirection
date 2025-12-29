@@ -27,3 +27,14 @@ Thumbs.db
 # Build outputs (if this folder is a built player output)
 HandRedirection/
 **/*_Data/
+
+# Unity build outputs
+HandRedirection/
+**/*_Data/
+**/*_BurstDebugInformation_DoNotShip/
+
+# Unity build outputs
+HandRedirection/
+**/*_Data/
+**/*_BurstDebugInformation_DoNotShip/
+
