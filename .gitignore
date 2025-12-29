@@ -23,3 +23,7 @@ UserSettings/
 # OS
 .DS_Store
 Thumbs.db
+
+# Build outputs (if this folder is a built player output)
+HandRedirection/
+**/*_Data/
