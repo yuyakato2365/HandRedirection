@@ -22,6 +22,7 @@ PluginImporter:
       enabled: 1
       settings:
         CPU: ARMv7
+        Is16KbAligned: false
     Any:
       enabled: 0
       settings: {}

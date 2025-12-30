@@ -42,3 +42,22 @@ HandRedirection/
 # OpenCVForUnity WebGL plugins (not used)
 Assets/OpenCVForUnity/Plugins/WebGL/
 
+
+# --- Local/IDE ---
+.vs/
+.utmp/
+*.slnx
+.vsconfig
+
+# --- Build outputs ---
+*.apk
+*.aab
+
+# --- Unity temp/cache (”O‚Ì‚½‚ß) ---
+Library/
+Temp/
+Obj/
+Logs/
+Build/
+Builds/
+
