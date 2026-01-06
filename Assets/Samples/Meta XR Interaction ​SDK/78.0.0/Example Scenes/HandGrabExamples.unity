@@ -790,6 +790,11 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 2655553564751457401, guid: ed67a44c9a96583488bc7759d67dd234, type: 3}
   m_PrefabInstance: {fileID: 27532519}
   m_PrefabAsset: {fileID: 0}
+--- !u!4 &30011933 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 3181877142221860573, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
+  m_PrefabInstance: {fileID: 2115107099}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &31655417
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -8798,7 +8803,7 @@ MonoBehaviour:
   enableJumpGate: 0
   maxJumpMeters: 0.2
   maxJumpDegrees: 45
-  processInterval: 0.005
+  processInterval: 0.01
   preview: {fileID: 0}
   statusText: {fileID: 0}
 --- !u!1 &626061495
@@ -9001,6 +9006,37 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 5203660969858054578, guid: 68b1409e312af054a9d5f07bc57e8bca, type: 3}
   m_PrefabInstance: {fileID: 632315001}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &650206705
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2115107100}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d469dcd109f775c46a26378045d8727e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cameraCenter: {fileID: 279069016}
+  leftHandOriginal: {fileID: 30011933}
+  leftHandRedirector: {fileID: 167320516}
+  rightHandOriginal: {fileID: 1384868311}
+  rightHandRedirector: {fileID: 1226806715}
+  cubeRealWorldSource: {fileID: 1923555133}
+  cubeReal: {fileID: 0}
+  cubeWarped: {fileID: 1244901458}
+  linearK: 2
+  linearWarpAffectX: 1
+  linearWarpAffectY: 0
+  linearWarpAffectZ: 1
+  baseHalfExtents: {x: 0.05, y: 0.05, z: 0.05}
+  useSurfaceDistanceForBlend: 1
+  blendDistanceIncludeY: 1
+  nearRadius: 0.2
+  farRadius: 0.35
+  useYawOnlyFrame: 1
+  sideRangeMargin: 0.01
 --- !u!1 &652562830
 GameObject:
   m_ObjectHideFlags: 0
@@ -19056,6 +19092,7 @@ GameObject:
   - component: {fileID: 1244901460}
   - component: {fileID: 1244901459}
   - component: {fileID: 1244901462}
+  - component: {fileID: 1244901463}
   m_Layer: 4
   m_Name: CubeWarped
   m_TagString: Untagged
@@ -19173,7 +19210,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1244901457}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: efc6e067f9da77646abe848f68dbe344, type: 3}
   m_Name: 
@@ -19190,6 +19227,45 @@ MonoBehaviour:
   hoverRadius: 0.05
   minScale: {x: 0.2, y: 0.2, z: 0.2}
   maxScale: {x: 2, y: 2, z: 2}
+  allHandles:
+  - {fileID: 2051779919}
+  - {fileID: 895339100}
+  - {fileID: 740166859}
+  - {fileID: 1669102147}
+  - {fileID: 106508311}
+  - {fileID: 189944075}
+  - {fileID: 1234229170}
+  - {fileID: 1104450197}
+  - {fileID: 1001838104}
+  - {fileID: 66600726}
+  - {fileID: 717508874}
+  - {fileID: 1447398334}
+  - {fileID: 1351421796}
+  - {fileID: 207924796}
+--- !u!114 &1244901463
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1244901457}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 84bf230b27845c6428b38aa3ab8e30aa, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cubeWarped: {fileID: 1244901458}
+  isStatic: 1
+  leftPinch: {fileID: 2115107112}
+  rightPinch: {fileID: 2053471792}
+  handleLayer:
+    serializedVersion: 2
+    m_Bits: 64
+  detectRadius: 0.025
+  breakDistance: 0.06
+  hoverRadius: 0.05
+  minScale: {x: 0.1, y: 0.1, z: 0}
+  maxScale: {x: 3, y: 3, z: 3}
   allHandles:
   - {fileID: 2051779919}
   - {fileID: 895339100}
@@ -21322,6 +21398,11 @@ PrefabInstance:
 Transform:
   m_CorrespondingSourceObject: {fileID: 5203660969858054578, guid: 68b1409e312af054a9d5f07bc57e8bca, type: 3}
   m_PrefabInstance: {fileID: 1384769712}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &1384868311 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 3181877142221855449, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
+  m_PrefabInstance: {fileID: 2115107099}
   m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1385907831
 PrefabInstance:
@@ -32081,6 +32162,37 @@ Transform:
   - {fileID: 1867484314}
   m_Father: {fileID: 496821518}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2106936425
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2115107100}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d4dfaebd982adcd47b503e2080280d59, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cameraCenter: {fileID: 279069016}
+  leftHandOriginal: {fileID: 30011933}
+  leftHandRedirector: {fileID: 167320516}
+  rightHandOriginal: {fileID: 1384868311}
+  rightHandRedirector: {fileID: 1226806715}
+  cubeRealWorldSource: {fileID: 1923555133}
+  cubeReal: {fileID: 0}
+  cubeWarped: {fileID: 1244901458}
+  linearK: 1
+  linearWarpAffectX: 1
+  linearWarpAffectY: 0
+  linearWarpAffectZ: 1
+  baseHalfExtents: {x: 0.5, y: 0.5, z: 0.5}
+  sideRangeMargin: 0
+  useSurfaceDistanceForBlend: 1
+  blendDistanceIncludeY: 1
+  nearRadius: 0.12
+  farRadius: 0.3
+  useYawOnlyFrame: 1
 --- !u!23 &2106936427
 MeshRenderer:
   m_ObjectHideFlags: 0
@@ -33364,15 +33476,16 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 1151561958811670282, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
       insertIndex: -1
       addedObject: {fileID: 2115107104}
+    - targetCorrespondingSourceObject: {fileID: 1151561958811670282, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 650206705}
+    - targetCorrespondingSourceObject: {fileID: 1151561958811670282, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 2106936425}
   m_SourcePrefab: {fileID: 100100000, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
 --- !u!1 &2115107100 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 1151561958811670282, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
-  m_PrefabInstance: {fileID: 2115107099}
-  m_PrefabAsset: {fileID: 0}
---- !u!4 &2115107101 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 3181877142221855449, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
   m_PrefabInstance: {fileID: 2115107099}
   m_PrefabAsset: {fileID: 0}
 --- !u!114 &2115107102 stripped
@@ -33386,11 +33499,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cb7623a8f0b49cf4dbaa40aea4d4be64, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!4 &2115107103 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: 3181877142221860573, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
-  m_PrefabInstance: {fileID: 2115107099}
-  m_PrefabAsset: {fileID: 0}
 --- !u!114 &2115107104
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -33398,31 +33506,30 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2115107100}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 154b2646b11ba9742bc9c49f01b2c0a5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   cameraCenter: {fileID: 279069016}
-  leftHandOriginal: {fileID: 2115107103}
+  leftHandOriginal: {fileID: 30011933}
   leftHandRedirector: {fileID: 167320516}
-  rightHandOriginal: {fileID: 2115107101}
+  rightHandOriginal: {fileID: 1384868311}
   rightHandRedirector: {fileID: 1226806715}
-  cubeRealWorldSource: {fileID: 424330229}
+  cubeRealWorldSource: {fileID: 1923555133}
   cubeReal: {fileID: 0}
   cubeWarped: {fileID: 1244901458}
-  deformController: {fileID: 1244901462}
   linearK: 2
-  nearRadius: 0.4
-  farRadius: 0.6
-  useSurfaceDistanceForBlend: 1
+  linearWarpAffectX: 1
+  linearWarpAffectY: 0
+  linearWarpAffectZ: 1
   baseHalfExtents: {x: 0.05, y: 0.05, z: 0.05}
+  useSurfaceDistanceForBlend: 1
+  blendDistanceIncludeY: 1
+  nearRadius: 0.2
+  farRadius: 0.35
+  axisGateTransitionWidth: 0
   useYawOnlyFrame: 1
-  cameraMoveEps: 0.0025
-  cameraYawEpsDeg: 0.25
-  cubeLocalMoveEps: 0.0005
-  cubeLocalRotEpsDeg: 0.1
-  baseWarpedScale: {x: 1, y: 1, z: 1}
 --- !u!1 &2115107105 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 8568527507492354302, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}

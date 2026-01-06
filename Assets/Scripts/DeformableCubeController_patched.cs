@@ -24,7 +24,7 @@ public class DeformableCubeController : MonoBehaviour
     public bool IsDeforming => _mode != Mode.None;
 
     /// <summary>
-    /// •ÏŒ`‚ªI—¹‚µ‚½uŠÔ‚ÉŒÄ‚Î‚ê‚éiƒsƒ“ƒ`‰ğœ / ğŒŠO‚ê‚Å’â~‚µ‚½uŠÔj
+    /// å¤‰å½¢ãŒçµ‚äº†ã—ãŸç¬é–“ã«å‘¼ã°ã‚Œã‚‹ï¼ˆãƒ”ãƒ³ãƒè§£é™¤ / æ¡ä»¶å¤–ã‚Œã§åœæ­¢ã—ãŸç¬é–“ï¼‰
     /// </summary>
     public event Action<Vector3> OnDeformEnd;
 
@@ -35,6 +35,8 @@ public class DeformableCubeController : MonoBehaviour
     Vector3 _scale0;
     float _d0;
 
+
+    bool _pendingBaseline = false;
     void Reset()
     {
         cubeWarped = transform;
@@ -160,6 +162,9 @@ public class DeformableCubeController : MonoBehaviour
             ResetDeform();
             return;
         }
+
+        // Beginç›´å¾Œã®1å›ç›®ã®ApplyDeformã§åŸºæº–è·é›¢ã‚’ç¢ºå®šã—ã€é–‹å§‹ç¬é–“ã®ã‚¹ã‚±ãƒ¼ãƒ«æ®µå·®ã‚’é˜²ã
+        _pendingBaseline = true;
     }
 
     float MeasureDistanceForMode(Mode m)
@@ -192,9 +197,20 @@ public class DeformableCubeController : MonoBehaviour
     void ApplyDeform()
     {
         float d = MeasureDistanceForMode(_mode);
-        float ratio = d / _d0;
 
-        Vector3 s = _scale0;
+        // é–‹å§‹ç›´å¾Œã®1å›ç›®ã ã‘ã€ä»Šã®è·é›¢ã‚’åŸºæº–ã¨ã—ã¦æ¡ç”¨ã—ã¦æ®µå·®ã‚’æ¶ˆã™
+        if (_pendingBaseline)
+        {
+            _d0 = Mathf.Max(d, 1e-4f);
+            _pendingBaseline = false;
+
+            // æœ€åˆã®é©ç”¨ã¯å¿…ãšå…ƒã‚¹ã‚±ãƒ¼ãƒ«ï¼ˆratio=1ï¼‰
+            cubeWarped.localScale = _scale0;
+            return;
+        }
+
+        float ratio = d / _d0;
+Vector3 s = _scale0;
 
         switch (_mode)
         {
@@ -225,12 +241,14 @@ public class DeformableCubeController : MonoBehaviour
         _scale0 = Vector3.one;
         _d0 = 0f;
 
+
+        _pendingBaseline = false;
         _latchedL = null;
         _latchedR = null;
 
         if (wasDeforming)
         {
-            // I—¹’Ê’mFÅIƒXƒP[ƒ‹‚ğ“n‚·
+            // çµ‚äº†é€šçŸ¥ï¼šæœ€çµ‚ã‚¹ã‚±ãƒ¼ãƒ«ã‚’æ¸¡ã™
             OnDeformEnd?.Invoke(cubeWarped != null ? cubeWarped.localScale : Vector3.one);
         }
     }
@@ -259,16 +277,16 @@ public class DeformableCubeController : MonoBehaviour
 */
 
 
-
+/*
 using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class DeformableCubeController_Pre: MonoBehaviour
+public class DeformableCubeController : MonoBehaviour
 {
     [Header("Cube")]
     public Transform cubeWarped;        // scale will be applied here (pivot at center)
-    public bool isStatic = true;        // Ã’u”»’èiŠJnğŒ‚É‚¾‚¯g‚¤j
+    public bool isStatic = true;        // é™ç½®åˆ¤å®šï¼ˆé–‹å§‹æ¡ä»¶ã«ã ã‘ä½¿ã†ï¼‰
 
     [Header("Hands")]
     public PinchProvider leftPinch;
@@ -276,11 +294,11 @@ public class DeformableCubeController_Pre: MonoBehaviour
 
     [Header("Handle Detection")]
     public LayerMask handleLayer;
-    public float detectRadius = 0.025f;     // ƒsƒ“ƒ`’†‚Ìƒ‰ƒbƒ`’Tõ—piOverlapSpherej
-    public float breakDistance = 0.06f;     // ƒsƒ“ƒ`“_‚ªƒ‰ƒbƒ`‚©‚ç—£‚ê‚½‚ç‰ğœ
+    public float detectRadius = 0.025f;     // ãƒ”ãƒ³ãƒä¸­ã®ãƒ©ãƒƒãƒæ¢ç´¢ç”¨ï¼ˆOverlapSphereï¼‰
+    public float breakDistance = 0.06f;     // ãƒ”ãƒ³ãƒç‚¹ãŒãƒ©ãƒƒãƒã‹ã‚‰é›¢ã‚ŒãŸã‚‰è§£é™¤
 
     [Header("Hover (Grabbable)")]
-    [Tooltip("è‚ª‹ß‚Ã‚¢‚½‚ç Grabbable ‚É‚·‚é”¼ŒaB‚Ü‚¸‚Í detectRadius ‚æ‚è­‚µ‘å‚«‚ß„§")]
+    [Tooltip("æ‰‹ãŒè¿‘ã¥ã„ãŸã‚‰ Grabbable ã«ã™ã‚‹åŠå¾„ã€‚ã¾ãšã¯ detectRadius ã‚ˆã‚Šå°‘ã—å¤§ãã‚æ¨å¥¨")]
     public float hoverRadius = 0.05f;
 
     [Header("Scale Limits")]
@@ -288,12 +306,12 @@ public class DeformableCubeController_Pre: MonoBehaviour
     public Vector3 maxScale = new Vector3(5f, 5f, 5f);
 
     [Header("Handle Cache (optional)")]
-    [Tooltip("‹ó‚È‚ç©“®‚Å‚±‚ÌƒIƒuƒWƒFƒNƒg”z‰º‚©‚ç DeformHandle ‚ğW‚ß‚é")]
+    [Tooltip("ç©ºãªã‚‰è‡ªå‹•ã§ã“ã®ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆé…ä¸‹ã‹ã‚‰ DeformHandle ã‚’é›†ã‚ã‚‹")]
     public DeformHandle[] allHandles;
 
     public bool IsDeforming => _mode != Mode.None;
 
-    /// <summary>•ÏŒ`‚ªI—¹‚µ‚½uŠÔ‚ÉŒÄ‚Î‚ê‚éiƒsƒ“ƒ`‰ğœ / ğŒŠO‚ê‚Å’â~‚µ‚½uŠÔj</summary>
+    /// <summary>å¤‰å½¢ãŒçµ‚äº†ã—ãŸç¬é–“ã«å‘¼ã°ã‚Œã‚‹ï¼ˆãƒ”ãƒ³ãƒè§£é™¤ / æ¡ä»¶å¤–ã‚Œã§åœæ­¢ã—ãŸç¬é–“ï¼‰</summary>
     public event Action<Vector3> OnDeformEnd;
 
     enum Mode { None, AxisX, AxisY, AxisZ, Uniform }
@@ -331,10 +349,10 @@ public class DeformableCubeController_Pre: MonoBehaviour
     {
         if (cubeWarped == null || leftPinch == null || rightPinch == null) return;
 
-        // --- 1) Hover XViƒsƒ“ƒ`‚µ‚Ä‚È‚­‚Ä‚àu‹ß‚¢v‚ğE‚¤j ---
+        // --- 1) Hover æ›´æ–°ï¼ˆãƒ”ãƒ³ãƒã—ã¦ãªãã¦ã‚‚ã€Œè¿‘ã„ã€ã‚’æ‹¾ã†ï¼‰ ---
         UpdateHoveredHandles();
 
-        // --- 2) •ÏŒ`ƒƒWƒbƒN–{‘Ì ---
+        // --- 2) å¤‰å½¢ãƒ­ã‚¸ãƒƒã‚¯æœ¬ä½“ ---
         if (!isStatic && _mode != Mode.None)
         {
             ResetDeform();
@@ -342,7 +360,7 @@ public class DeformableCubeController_Pre: MonoBehaviour
             return;
         }
 
-        // ƒsƒ“ƒ`’†‚Ì‚İƒ‰ƒbƒ`XVi’Í‚ñ‚Å‚¢‚éó‘Ô‚É“ü‚éj
+        // ãƒ”ãƒ³ãƒä¸­ã®ã¿ãƒ©ãƒƒãƒæ›´æ–°ï¼ˆï¼æ´ã‚“ã§ã„ã‚‹çŠ¶æ…‹ã«å…¥ã‚‹ï¼‰
         UpdateLatchForHand(leftPinch, ref _latchedL);
         UpdateLatchForHand(rightPinch, ref _latchedR);
 
@@ -370,18 +388,18 @@ public class DeformableCubeController_Pre: MonoBehaviour
             ApplyDeform();
         }
 
-        // --- 3) Œ©‚½–Úiƒ}ƒeƒŠƒAƒ‹j”½‰f ---
+        // --- 3) è¦‹ãŸç›®ï¼ˆãƒãƒ†ãƒªã‚¢ãƒ«ï¼‰åæ˜  ---
         UpdateHandleVisuals();
     }
 
     // --------------------------
-    // HoveriGrabbablejŒŸo
+    // Hoverï¼ˆGrabbableï¼‰æ¤œå‡º
     // --------------------------
     void UpdateHoveredHandles()
     {
         _hovered.Clear();
 
-        // PinchPosWorld ‚Í IsPinching=false ‚Å‚à gèæ‚Ì‘ã•\“_h ‚Æ‚µ‚Äg‚¦‚é‘z’è
+        // PinchPosWorld ã¯ IsPinching=false ã§ã‚‚ â€œæ‰‹å…ˆã®ä»£è¡¨ç‚¹â€ ã¨ã—ã¦ä½¿ãˆã‚‹æƒ³å®š
         AddHoveredAround(leftPinch != null ? leftPinch.PinchPosWorld : Vector3.zero);
         AddHoveredAround(rightPinch != null ? rightPinch.PinchPosWorld : Vector3.zero);
     }
@@ -399,7 +417,7 @@ public class DeformableCubeController_Pre: MonoBehaviour
     }
 
     // --------------------------
-    // LatchiGrabbedjŒŸo
+    // Latchï¼ˆGrabbedï¼‰æ¤œå‡º
     // --------------------------
     void UpdateLatchForHand(PinchProvider pinch, ref DeformHandle latched)
     {
@@ -558,13 +576,13 @@ public class DeformableCubeController_Pre: MonoBehaviour
     }
 
     // --------------------------
-    // Visualsi3ó‘Ôj
+    // Visualsï¼ˆ3çŠ¶æ…‹ï¼‰
     // --------------------------
     void UpdateHandleVisuals()
     {
         if (allHandles == null) return;
 
-        // 1) ‚Ü‚¸‘S‚Ä Standby
+        // 1) ã¾ãšå…¨ã¦ Standby
         for (int i = 0; i < allHandles.Length; i++)
         {
             var h = allHandles[i];
@@ -572,14 +590,362 @@ public class DeformableCubeController_Pre: MonoBehaviour
             h.SetVisualState(DeformHandle.VisualState.Standby);
         }
 
-        // 2) Hover‚µ‚Ä‚¢‚é‚à‚Ì‚ğ Grabbable
+        // 2) Hoverã—ã¦ã„ã‚‹ã‚‚ã®ã‚’ Grabbable
         foreach (var h in _hovered)
         {
             if (h == null) continue;
             h.SetVisualState(DeformHandle.VisualState.Grabbable);
         }
 
-        // 3) ’Í‚ñ‚Å‚¢‚éiƒsƒ“ƒ`‚Åƒ‰ƒbƒ`’†^•ÏŒ`’†j‚Í GrabbediÅ—Dæj
+        // 3) æ´ã‚“ã§ã„ã‚‹ï¼ˆãƒ”ãƒ³ãƒã§ãƒ©ãƒƒãƒä¸­ï¼å¤‰å½¢ä¸­ï¼‰ã¯ Grabbedï¼ˆæœ€å„ªå…ˆï¼‰
+        if (_latchedL != null && leftPinch.IsPinching)
+            _latchedL.SetVisualState(DeformHandle.VisualState.Grabbed);
+
+        if (_latchedR != null && rightPinch.IsPinching)
+            _latchedR.SetVisualState(DeformHandle.VisualState.Grabbed);
+    }
+}
+*/
+
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class DeformableCubeController : MonoBehaviour
+{
+    [Header("Cube")]
+    public Transform cubeWarped;        // scale will be applied here (pivot at center)
+    public bool isStatic = true;        // ï¿½Ã’uï¿½ï¿½ï¿½ï¿½iï¿½Jï¿½nï¿½ï¿½ï¿½ï¿½ï¿½É‚ï¿½ï¿½ï¿½ï¿½gï¿½ï¿½ï¿½j
+
+    [Header("Hands")]
+    public PinchProvider leftPinch;
+    public PinchProvider rightPinch;
+
+    [Header("Handle Detection")]
+    public LayerMask handleLayer;
+    public float detectRadius = 0.025f;     // ï¿½sï¿½ï¿½ï¿½`ï¿½ï¿½ï¿½Ìƒï¿½ï¿½bï¿½`ï¿½Tï¿½ï¿½ï¿½pï¿½iOverlapSphereï¿½j
+    public float breakDistance = 0.06f;     // ï¿½sï¿½ï¿½ï¿½`ï¿½_ï¿½ï¿½ï¿½ï¿½ï¿½bï¿½`ï¿½ï¿½ï¿½ç—£ï¿½ê‚½ï¿½ï¿½ï¿½ï¿½ï¿½
+
+    [Header("Hover (Grabbable)")]
+    [Tooltip("ï¿½è‚ªï¿½ß‚Ã‚ï¿½ï¿½ï¿½ï¿½ï¿½ Grabbable ï¿½É‚ï¿½ï¿½é”¼ï¿½aï¿½Bï¿½Ü‚ï¿½ï¿½ï¿½ detectRadius ï¿½ï¿½è­ï¿½ï¿½ï¿½å‚«ï¿½ßï¿½ï¿½ï¿½")]
+    public float hoverRadius = 0.05f;
+
+    [Header("Scale Limits")]
+    public Vector3 minScale = new Vector3(0.2f, 0.2f, 0.2f);
+    public Vector3 maxScale = new Vector3(5f, 5f, 5f);
+
+    [Header("Handle Cache (optional)")]
+    [Tooltip("ï¿½ï¿½È‚ç©ï¿½ï¿½ï¿½Å‚ï¿½ï¿½ÌƒIï¿½uï¿½Wï¿½Fï¿½Nï¿½gï¿½zï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ DeformHandle ï¿½ï¿½ï¿½Wï¿½ß‚ï¿½")]
+    public DeformHandle[] allHandles;
+
+    public bool IsDeforming => _mode != Mode.None;
+
+    /// <summary>ï¿½ÏŒ`ï¿½ï¿½ï¿½Iï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½uï¿½Ô‚ÉŒÄ‚Î‚ï¿½ï¿½iï¿½sï¿½ï¿½ï¿½`ï¿½ï¿½ï¿½ï¿½ / ï¿½ï¿½ï¿½ï¿½ï¿½Oï¿½ï¿½Å’ï¿½~ï¿½ï¿½ï¿½ï¿½ï¿½uï¿½Ôj</summary>
+    public event Action<Vector3> OnDeformEnd;
+
+    enum Mode { None, AxisX, AxisY, AxisZ, Uniform }
+    Mode _mode = Mode.None;
+
+    DeformHandle _latchedL, _latchedR;
+    Vector3 _scale0;
+    float _d0;
+
+
+    bool _pendingBaseline = false;
+    readonly HashSet<DeformHandle> _hovered = new HashSet<DeformHandle>();
+
+    void Reset()
+    {
+        cubeWarped = transform;
+    }
+
+    void Awake()
+    {
+        CacheHandlesIfNeeded();
+    }
+
+    void OnValidate()
+    {
+        CacheHandlesIfNeeded();
+        if (hoverRadius <= 0f) hoverRadius = detectRadius;
+    }
+
+    void CacheHandlesIfNeeded()
+    {
+        if (allHandles != null && allHandles.Length > 0) return;
+        allHandles = GetComponentsInChildren<DeformHandle>(includeInactive: true);
+    }
+
+    void Update()
+    {
+        if (cubeWarped == null || leftPinch == null || rightPinch == null) return;
+
+        // --- 1) Hover ï¿½Xï¿½Vï¿½iï¿½sï¿½ï¿½ï¿½`ï¿½ï¿½ï¿½Ä‚È‚ï¿½ï¿½Ä‚ï¿½ï¿½uï¿½ß‚ï¿½ï¿½vï¿½ï¿½ï¿½Eï¿½ï¿½ï¿½j ---
+        UpdateHoveredHandles();
+
+        // --- 2) ï¿½ÏŒ`ï¿½ï¿½ï¿½Wï¿½bï¿½Nï¿½{ï¿½ï¿½ ---
+        if (!isStatic && _mode != Mode.None)
+        {
+            ResetDeform();
+            UpdateHandleVisuals();
+            return;
+        }
+
+        // ï¿½sï¿½ï¿½ï¿½`ï¿½ï¿½ï¿½Ì‚İƒï¿½ï¿½bï¿½`ï¿½Xï¿½Vï¿½iï¿½ï¿½ï¿½Í‚ï¿½Å‚ï¿½ï¿½ï¿½ï¿½Ô‚É“ï¿½ï¿½ï¿½j
+        UpdateLatchForHand(leftPinch, ref _latchedL);
+        UpdateLatchForHand(rightPinch, ref _latchedR);
+
+        if (_mode == Mode.None)
+        {
+            TryBeginDeform();
+        }
+        else
+        {
+            if (!leftPinch.IsPinching || !rightPinch.IsPinching)
+            {
+                ResetDeform();
+                UpdateHandleVisuals();
+                return;
+            }
+
+            if (!IsNearLatched(leftPinch.PinchPosWorld, _latchedL) ||
+                !IsNearLatched(rightPinch.PinchPosWorld, _latchedR))
+            {
+                ResetDeform();
+                UpdateHandleVisuals();
+                return;
+            }
+
+            ApplyDeform();
+        }
+
+        // --- 3) ï¿½ï¿½ï¿½ï¿½ï¿½Úiï¿½}ï¿½eï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½jï¿½ï¿½ï¿½f ---
+        UpdateHandleVisuals();
+    }
+
+    // --------------------------
+    // Hoverï¿½iGrabbableï¿½jï¿½ï¿½ï¿½o
+    // --------------------------
+    void UpdateHoveredHandles()
+    {
+        _hovered.Clear();
+
+        // PinchPosWorld ï¿½ï¿½ IsPinching=false ï¿½Å‚ï¿½ ï¿½gï¿½ï¿½ï¿½Ì‘ï¿½\ï¿½_ï¿½h ï¿½Æ‚ï¿½ï¿½Ägï¿½ï¿½ï¿½ï¿½zï¿½ï¿½
+        AddHoveredAround(leftPinch != null ? leftPinch.PinchPosWorld : Vector3.zero);
+        AddHoveredAround(rightPinch != null ? rightPinch.PinchPosWorld : Vector3.zero);
+    }
+
+    void AddHoveredAround(Vector3 pos)
+    {
+        var hits = Physics.OverlapSphere(pos, hoverRadius, handleLayer, QueryTriggerInteraction.Collide);
+        if (hits == null) return;
+
+        foreach (var c in hits)
+        {
+            var h = c.GetComponentInParent<DeformHandle>();
+            if (h != null) _hovered.Add(h);
+        }
+    }
+
+    // --------------------------
+    // Latchï¿½iGrabbedï¿½jï¿½ï¿½ï¿½o
+    // --------------------------
+    void UpdateLatchForHand(PinchProvider pinch, ref DeformHandle latched)
+    {
+        if (!pinch.IsPinching)
+        {
+            latched = null;
+            return;
+        }
+
+        if (!isStatic && _mode == Mode.None)
+        {
+            latched = null;
+            return;
+        }
+
+        if (latched != null && IsNearLatched(pinch.PinchPosWorld, latched))
+            return;
+
+        latched = FindNearestHandle(pinch.PinchPosWorld);
+    }
+
+    bool IsNearLatched(Vector3 pinchPos, DeformHandle h)
+    {
+        if (h == null) return false;
+        return Vector3.Distance(pinchPos, h.transform.position) <= breakDistance;
+    }
+
+    DeformHandle FindNearestHandle(Vector3 pos)
+    {
+        Collider[] hits = Physics.OverlapSphere(pos, detectRadius, handleLayer, QueryTriggerInteraction.Collide);
+        if (hits == null || hits.Length == 0) return null;
+
+        float best = float.PositiveInfinity;
+        DeformHandle bestH = null;
+        foreach (var c in hits)
+        {
+            var h = c.GetComponentInParent<DeformHandle>();
+            if (h == null) continue;
+            float d = Vector3.Distance(pos, h.transform.position);
+            if (d < best)
+            {
+                best = d;
+                bestH = h;
+            }
+        }
+        return bestH;
+    }
+
+    // --------------------------
+    // Deform
+    // --------------------------
+    void TryBeginDeform()
+    {
+        if (!isStatic) return;
+        if (_latchedL == null || _latchedR == null) return;
+        if (!leftPinch.IsPinching || !rightPinch.IsPinching) return;
+
+        if (IsOppositeFacePair(_latchedL, _latchedR, DeformHandle.Axis.X)) { Begin(Mode.AxisX); return; }
+        if (IsOppositeFacePair(_latchedL, _latchedR, DeformHandle.Axis.Y)) { Begin(Mode.AxisY); return; }
+        if (IsOppositeFacePair(_latchedL, _latchedR, DeformHandle.Axis.Z)) { Begin(Mode.AxisZ); return; }
+
+        if (IsOppositeCornerPair(_latchedL, _latchedR)) { Begin(Mode.Uniform); return; }
+    }
+
+    void Begin(Mode m)
+    {
+        _mode = m;
+        _scale0 = cubeWarped.localScale;
+
+        _d0 = MeasureDistanceForMode(m);
+        if (_d0 < 1e-4f)
+        {
+            ResetDeform();
+            return;
+        }
+
+
+        // Beginï¿½ï¿½ï¿½ï¿½ï¿½1ï¿½ï¿½Ú‚ï¿½ApplyDeformï¿½ÅŠî€ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½mï¿½è‚µï¿½Aï¿½Jï¿½nï¿½uï¿½Ô‚ÌƒXï¿½Pï¿½[ï¿½ï¿½ï¿½iï¿½ï¿½ï¿½ï¿½hï¿½ï¿½
+        _pendingBaseline = true;
+    }
+
+    float MeasureDistanceForMode(Mode m)
+    {
+        Vector3 pL = leftPinch.PinchPosWorld;
+        Vector3 pR = rightPinch.PinchPosWorld;
+
+        if (m == Mode.Uniform)
+            return Vector3.Distance(pL, pR);
+
+        Vector3 axis = GetWorldAxis(m);
+        return Mathf.Abs(Vector3.Dot(pR - pL, axis));
+    }
+
+    Vector3 GetWorldAxis(Mode m)
+    {
+        switch (m)
+        {
+            case Mode.AxisX: return cubeWarped.right.normalized;
+            case Mode.AxisY: return cubeWarped.up.normalized;
+            case Mode.AxisZ: return cubeWarped.forward.normalized;
+            default: return Vector3.right;
+        }
+    }
+
+    void ApplyDeform()
+    {
+        float d = MeasureDistanceForMode(_mode);
+
+        // ï¿½ÏŒ`ï¿½Jï¿½nï¿½ï¿½ï¿½ï¿½ï¿½1ï¿½ï¿½Ú‚ï¿½ï¿½ï¿½ï¿½Aï¿½ï¿½ï¿½Ì‹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½î€ï¿½Æ‚ï¿½ï¿½ÄÌ—pï¿½ï¿½ï¿½Aratio=1ï¿½ï¿½ï¿½ï¿½Jï¿½nï¿½ï¿½ï¿½ï¿½
+        if (_pendingBaseline)
+        {
+            _d0 = Mathf.Max(d, 1e-4f);
+            _pendingBaseline = false;
+            cubeWarped.localScale = _scale0;
+            return;
+        }
+
+        float ratio = d / _d0;
+
+        Vector3 s = _scale0;
+
+        switch (_mode)
+        {
+            case Mode.AxisX: s = new Vector3(_scale0.x * ratio, _scale0.y, _scale0.z); break;
+            case Mode.AxisY: s = new Vector3(_scale0.x, _scale0.y * ratio, _scale0.z); break;
+            case Mode.AxisZ: s = new Vector3(_scale0.x, _scale0.y, _scale0.z * ratio); break;
+            case Mode.Uniform: s = _scale0 * ratio; break;
+        }
+
+        s = new Vector3(
+            Mathf.Clamp(s.x, minScale.x, maxScale.x),
+            Mathf.Clamp(s.y, minScale.y, maxScale.y),
+            Mathf.Clamp(s.z, minScale.z, maxScale.z)
+        );
+
+        cubeWarped.localScale = s;
+    }
+
+    void ResetDeform()
+    {
+        bool wasDeforming = (_mode != Mode.None);
+
+        _mode = Mode.None;
+        _scale0 = Vector3.one;
+        _d0 = 0f;
+
+
+
+        _pendingBaseline = false;
+        _latchedL = null;
+        _latchedR = null;
+
+        if (wasDeforming)
+            OnDeformEnd?.Invoke(cubeWarped != null ? cubeWarped.localScale : Vector3.one);
+    }
+
+    bool IsOppositeFacePair(DeformHandle a, DeformHandle b, DeformHandle.Axis axis)
+    {
+        if (a == null || b == null) return false;
+        if (a.kind != DeformHandle.Kind.Face || b.kind != DeformHandle.Kind.Face) return false;
+        if (a.faceAxis != axis || b.faceAxis != axis) return false;
+        return a.faceSign == -b.faceSign;
+    }
+
+    bool IsOppositeCornerPair(DeformHandle a, DeformHandle b)
+    {
+        if (a == null || b == null) return false;
+        if (a.kind != DeformHandle.Kind.Corner || b.kind != DeformHandle.Kind.Corner) return false;
+
+        Vector3Int sa = a.cornerSign;
+        Vector3Int sb = b.cornerSign;
+        return (sa.x == -sb.x) && (sa.y == -sb.y) && (sa.z == -sb.z);
+    }
+
+    // --------------------------
+    // Visualsï¿½i3ï¿½ï¿½Ôj
+    // --------------------------
+    void UpdateHandleVisuals()
+    {
+        if (allHandles == null) return;
+
+        // 1) ï¿½Ü‚ï¿½ï¿½Sï¿½ï¿½ Standby
+        for (int i = 0; i < allHandles.Length; i++)
+        {
+            var h = allHandles[i];
+            if (h == null) continue;
+            h.SetVisualState(DeformHandle.VisualState.Standby);
+        }
+
+        // 2) Hoverï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½ï¿½ï¿½Ì‚ï¿½ Grabbable
+        foreach (var h in _hovered)
+        {
+            if (h == null) continue;
+            h.SetVisualState(DeformHandle.VisualState.Grabbable);
+        }
+
+        // 3) ï¿½Í‚ï¿½Å‚ï¿½ï¿½ï¿½iï¿½sï¿½ï¿½ï¿½`ï¿½Åƒï¿½ï¿½bï¿½`ï¿½ï¿½ï¿½^ï¿½ÏŒ`ï¿½ï¿½ï¿½jï¿½ï¿½ Grabbedï¿½iï¿½Å—Dï¿½ï¿½j
         if (_latchedL != null && leftPinch.IsPinching)
             _latchedL.SetVisualState(DeformHandle.VisualState.Grabbed);
 
