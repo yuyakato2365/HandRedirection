@@ -9035,7 +9035,7 @@ MonoBehaviour:
   blendDistanceIncludeY: 1
   nearRadius: 0.2
   farRadius: 0.35
-  enableRemoteFarRadius: 1
+  enableRemoteFarRadius: 0
   knobReceiver: {fileID: 1429914063}
   farRadiusAddMax: 1
   farEpsilon: 0.001
@@ -21817,7 +21817,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   listenPort: 5005
+  allowedSenderIp: 10.146.2.70
+  logDroppedPackets: 0
   knob01: 0
+  secondsSinceLastPacket: 999
+  lastFrom: 
 --- !u!4 &1429914064
 Transform:
   m_ObjectHideFlags: 0

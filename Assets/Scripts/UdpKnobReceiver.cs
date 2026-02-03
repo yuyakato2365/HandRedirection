@@ -11,6 +11,13 @@ public class UdpKnobReceiver : MonoBehaviour
     [Header("UDP Listen")]
     public int listenPort = 5005;
 
+    [Header("Filter (optional)")]
+    [Tooltip("空なら全送信元を受け付ける。指定すると、そのIPv4/IPv6からのUDPのみ採用する（例: 172.20.10.126）")]
+    public string allowedSenderIp = ""; // ESP32のIPなど
+
+    [Tooltip("trueならフィルタに一致しないパケットを捨てるログを出す（デバッグ用、連打注意）")]
+    public bool logDroppedPackets = false;
+
     [Header("Debug")]
     [Range(0f, 1f)] public float knob01;
     public float secondsSinceLastPacket = 999f;
@@ -18,11 +25,14 @@ public class UdpKnobReceiver : MonoBehaviour
 
     private UdpClient _udp;
     private Thread _thread;
-    private volatile float _latest;     // ここはvolatileでOK
+    private volatile float _latest;
     private volatile bool _running;
 
     private readonly object _lock = new object();
     private DateTime _lastPacketTime = DateTime.MinValue;
+
+    // 解析済みの許可IP（nullならフィルタ無効）
+    private IPAddress _allowedAddr = null;
 
     void Awake()
     {
@@ -31,6 +41,17 @@ public class UdpKnobReceiver : MonoBehaviour
 
     void OnEnable()
     {
+        // allowedSenderIp を事前パース
+        _allowedAddr = null;
+        if (!string.IsNullOrWhiteSpace(allowedSenderIp))
+        {
+            if (!IPAddress.TryParse(allowedSenderIp.Trim(), out _allowedAddr))
+            {
+                Debug.LogWarning($"[UdpKnobReceiver] allowedSenderIp parse failed: '{allowedSenderIp}'. Filter disabled.");
+                _allowedAddr = null;
+            }
+        }
+
         _running = true;
 
         // IPv4で明示的にバインド（Quest実機で安定しやすい）
@@ -61,10 +82,9 @@ public class UdpKnobReceiver : MonoBehaviour
         DateTime t;
         lock (_lock) t = _lastPacketTime;
 
-        if (t == DateTime.MinValue)
-            secondsSinceLastPacket = 999f;
-        else
-            secondsSinceLastPacket = (float)(DateTime.UtcNow - t).TotalSeconds;
+        secondsSinceLastPacket = (t == DateTime.MinValue)
+            ? 999f
+            : (float)(DateTime.UtcNow - t).TotalSeconds;
     }
 
     private void RecvLoop()
@@ -76,6 +96,15 @@ public class UdpKnobReceiver : MonoBehaviour
             try
             {
                 byte[] data = _udp.Receive(ref ep);
+
+                // ★追加：送信元IPフィルタ
+                if (_allowedAddr != null && !ep.Address.Equals(_allowedAddr))
+                {
+                    if (logDroppedPackets)
+                        Debug.Log($"[UdpKnobReceiver] Dropped from {ep.Address}:{ep.Port}");
+                    continue;
+                }
+
                 string s = Encoding.ASCII.GetString(data).Trim();
 
                 if (float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out float v))
