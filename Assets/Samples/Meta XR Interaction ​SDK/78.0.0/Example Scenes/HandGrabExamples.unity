@@ -23595,9 +23595,13 @@ MonoBehaviour:
   targetDeviceIndex: -1
   applyUnityZFlip: 1
   enableTrackerOffset: 1
-  cubeCenterOffsetInTracker: {x: 0, y: 0, z: 0}
+  cubeCenterOffsetInTracker: {x: 0, y: 0, z: -0.03}
   enablePivotOffset: 1
-  pivotOffsetInTracker: {x: 0, y: 0.03, z: -0.0375}
+  pivotOffsetInTracker: {x: 0, y: 0, z: 0}
+  enableWorldOffset: 1
+  worldPositionOffset: {x: 0, y: 0.15, z: 0}
+  worldRotationOffsetEuler: {x: 0, y: 0, z: 0}
+  applyWorldRotThenPos: 1
   cubeCenterWorld: {fileID: 424330229}
   hmdTransform: {fileID: 279069016}
   cubeWorldOut: {fileID: 1742942822}
