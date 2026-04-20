@@ -962,7 +962,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class DeformableCubeController : MonoBehaviour
+public class DeformableCubeController2 : MonoBehaviour
 {
     [Header("Cube")]
     public Transform cubeWarped;        // scale will be applied here (pivot at center)
