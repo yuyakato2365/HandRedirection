@@ -10525,6 +10525,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   cameraCenter: {fileID: 279069016}
+  deskOrigin: {fileID: 2147400102}
+  deskWidthScale: 1
+  deskDepthScale: 1
+  deskEntryBlendHalfWidth: 0.05
+  deskAxisMode: 0
+  invertDeskWarpX: 0
+  invertDeskWarpZ: 0
   leftHandOriginal: {fileID: 30011933}
   leftHandRedirector: {fileID: 167320516}
   rightHandOriginal: {fileID: 1384868311}
@@ -26699,8 +26706,13 @@ MonoBehaviour:
   listenPort: 9000
   forceIPv4: 1
   hmdTransform: {fileID: 279069016}
+  deskTransform: {fileID: 2147400102}
   headToHmdPos: {x: 0, y: 0, z: 0}
   headToHmdEuler: {x: 0, y: 0, z: 0}
+  deskPositionLerp: 0
+  deskRotationSlerp: 0
+  deskPositionOffset: {x: 0, y: 0, z: 0}
+  deskEulerOffset: {x: 0, y: 0, z: 0}
   targets:
   - objectId: 1
     objTransform: {fileID: 1923555133}
@@ -26718,6 +26730,7 @@ MonoBehaviour:
   rotationSlerp: 0
   logBadPackets: 0
   logReceivedIds: 0
+  logDeskPackets: 0
 --- !u!4 &1520377274 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 4467138112451190354, guid: 4beb76053a241254bbc8ab705a1200fa, type: 3}
@@ -39110,3 +39123,36 @@ SceneRoots:
   - {fileID: 567481532}
   - {fileID: 789922024}
   - {fileID: 198639346}
+  - {fileID: 2147400102}
+--- !u!1 &2147400101
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2147400102}
+  m_Layer: 0
+  m_Name: DeskOrigin
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2147400102
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2147400101}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+
