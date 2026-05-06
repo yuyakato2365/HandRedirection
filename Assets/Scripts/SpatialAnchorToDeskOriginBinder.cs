@@ -51,6 +51,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool followEveryFrame = true;
     [Tooltip("Keep applying anchor pose after desk alignment is confirmed. Usually false avoids head-motion drift from live anchor updates.")]
     public bool followConfirmedAnchorEveryFrame = false;
+    [Tooltip("When the headset is worn again, reapply the saved anchor pose to deskOrigin once.")]
+    public bool reapplyDeskOnHmdMounted = true;
+    public float hmdMountedReapplyDelaySec = 0.75f;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -62,7 +65,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool IsAlignmentConfirmed { get; private set; }
     public bool IsAdjustingAlignment => HasAlignmentState && !IsAlignmentConfirmed;
     public float CurrentYawAdjustmentDegrees => yawAdjustmentDegrees;
-    public bool HasSavedOffsetForCurrentAnchor => HasSavedOffsetForAnchor(GetCurrentAnchorUuid());
 
     public event Action AlignmentStarted;
     public event Action AlignmentChanged;
@@ -85,6 +87,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private float nextLeftWristFailureLogTime;
     private string lastLeftRotationSource = "none";
     private string handAlignmentLogPath;
+    private bool pendingHmdMountedReapply;
+    private float hmdMountedReapplyTime;
 
     private void Awake()
     {
@@ -104,8 +108,24 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             ApplyNow();
     }
 
+    private void OnEnable()
+    {
+        OVRManager.HMDMounted += OnHmdMounted;
+    }
+
+    private void OnDisable()
+    {
+        OVRManager.HMDMounted -= OnHmdMounted;
+    }
+
     private void LateUpdate()
     {
+        if (pendingHmdMountedReapply && Time.realtimeSinceStartup >= hmdMountedReapplyTime)
+        {
+            pendingHmdMountedReapply = false;
+            ReapplyDeskToCurrentAnchor("HMD mounted");
+        }
+
         if (ShouldApplyAnchorPoseThisFrame())
             ApplyNow();
 
@@ -253,48 +273,24 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     public bool LoadSavedOffsetFromPrefs()
     {
-        return LoadSavedOffsetForAnchor(Guid.Empty);
-    }
-
-    public bool LoadSavedOffsetForCurrentAnchor()
-    {
-        return LoadSavedOffsetForAnchor(GetCurrentAnchorUuid());
-    }
-
-    public bool LoadSavedOffsetForAnchor(Guid expectedAnchorUuid)
-    {
         if (!persistOffsetInPlayerPrefs || string.IsNullOrEmpty(savedOffsetPlayerPrefsKey))
             return false;
 
         string json = PlayerPrefs.GetString(savedOffsetPlayerPrefsKey, "");
         if (string.IsNullOrWhiteSpace(json))
-        {
-            if (expectedAnchorUuid != Guid.Empty)
-                ResetRuntimeOffset();
             return false;
-        }
 
         try
         {
             SavedDeskAnchorOffset saved = JsonUtility.FromJson<SavedDeskAnchorOffset>(json);
-            if (expectedAnchorUuid != Guid.Empty &&
-                (!Guid.TryParse(saved.anchorUuid, out Guid savedAnchorUuid) || savedAnchorUuid != expectedAnchorUuid))
-            {
-                LogAlignmentEvent($"Saved desk offset ignored: expectedAnchor={expectedAnchorUuid} savedAnchor={saved.anchorUuid}");
-                ResetRuntimeOffset();
-                return false;
-            }
-
             localPositionOffset = saved.localPositionOffset;
             localEulerOffset = saved.localEulerOffset;
-            LogAlignmentEvent($"Loaded saved desk offset anchor={saved.anchorUuid} pos={localPositionOffset} euler={localEulerOffset}");
+            LogAlignmentEvent($"Loaded saved desk offset pos={localPositionOffset} euler={localEulerOffset}");
             return true;
         }
         catch (Exception e)
         {
             Debug.LogWarning($"[SpatialAnchorToDeskOriginBinder] Failed to load saved desk offset: {e.Message}");
-            if (expectedAnchorUuid != Guid.Empty)
-                ResetRuntimeOffset();
             return false;
         }
     }
@@ -306,13 +302,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         SavedDeskAnchorOffset saved = new SavedDeskAnchorOffset
         {
-            anchorUuid = GetCurrentAnchorUuid().ToString(),
             localPositionOffset = localPositionOffset,
             localEulerOffset = localEulerOffset
         };
         PlayerPrefs.SetString(savedOffsetPlayerPrefsKey, JsonUtility.ToJson(saved));
         PlayerPrefs.Save();
-        LogAlignmentEvent($"Saved desk offset anchor={saved.anchorUuid} pos={localPositionOffset} euler={localEulerOffset}");
+        LogAlignmentEvent($"Saved desk offset pos={localPositionOffset} euler={localEulerOffset}");
     }
 
     public void ClearSavedOffsetPrefs()
@@ -342,42 +337,22 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AlignmentConfirmed?.Invoke();
     }
 
-    private bool HasSavedOffsetForAnchor(Guid expectedAnchorUuid)
+    public void ReapplyDeskToCurrentAnchor(string reason)
     {
-        if (!persistOffsetInPlayerPrefs || string.IsNullOrEmpty(savedOffsetPlayerPrefsKey))
-            return false;
+        if (!HasAlignmentState || !IsAlignmentConfirmed)
+            return;
 
-        string json = PlayerPrefs.GetString(savedOffsetPlayerPrefsKey, "");
-        if (string.IsNullOrWhiteSpace(json))
-            return false;
+        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
+        if (anchor == null)
+            return;
 
-        try
-        {
-            SavedDeskAnchorOffset saved = JsonUtility.FromJson<SavedDeskAnchorOffset>(json);
-            return expectedAnchorUuid == Guid.Empty ||
-                   (Guid.TryParse(saved.anchorUuid, out Guid savedAnchorUuid) && savedAnchorUuid == expectedAnchorUuid);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private Guid GetCurrentAnchorUuid()
-    {
-        return anchorPlacer != null ? anchorPlacer.CurrentPersistentAnchorUuid : Guid.Empty;
-    }
-
-    private void ResetRuntimeOffset()
-    {
-        localPositionOffset = Vector3.zero;
-        localEulerOffset = Vector3.zero;
+        ApplySavedOffsetAsConfirmed();
+        LogAlignmentEvent($"ReapplyDeskToCurrentAnchor reason={reason} desk={FormatTransform(deskOrigin)}");
     }
 
     [Serializable]
     private struct SavedDeskAnchorOffset
     {
-        public string anchorUuid;
         public Vector3 localPositionOffset;
         public Vector3 localEulerOffset;
     }
@@ -405,6 +380,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return true;
 
         return !IsAlignmentConfirmed || followConfirmedAnchorEveryFrame;
+    }
+
+    private void OnHmdMounted()
+    {
+        if (!reapplyDeskOnHmdMounted)
+            return;
+
+        pendingHmdMountedReapply = true;
+        hmdMountedReapplyTime = Time.realtimeSinceStartup + Mathf.Max(0f, hmdMountedReapplyDelaySec);
+        LogAlignmentEvent("HMD mounted; queued desk reapply to current anchor");
     }
 
     private void UpdateHandRotationAlignment()
