@@ -5,20 +5,6 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
 {
     private const string LogPrefix = "[PassthroughRuntimeGuard]";
 
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    private static void Install()
-    {
-        var existing = FindFirstObjectByType<PassthroughRuntimeGuard>();
-        if (existing != null)
-        {
-            return;
-        }
-
-        var guard = new GameObject(nameof(PassthroughRuntimeGuard));
-        DontDestroyOnLoad(guard);
-        guard.AddComponent<PassthroughRuntimeGuard>();
-    }
-
     private IEnumerator Start()
     {
         yield return null;
