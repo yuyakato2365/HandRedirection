@@ -204,8 +204,15 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         {
             if (placer != null && placer.LastAnchorWasLoadedSavedAnchor)
             {
-                deskBinder.LoadSavedOffsetFromPrefs();
-                deskBinder.ApplySavedOffsetAsConfirmed();
+                if (deskBinder.LoadSavedOffsetForCurrentAnchor())
+                {
+                    deskBinder.ApplySavedOffsetAsConfirmed();
+                }
+                else
+                {
+                    deskBinder.BeginManualRotationAlignment();
+                    placer.SetStatusMessage("Saved anchor loaded\nDesk offset is missing or from another anchor\nRealign desk, then right pinch confirms");
+                }
             }
             else
             {

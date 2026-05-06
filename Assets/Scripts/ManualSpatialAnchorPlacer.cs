@@ -90,6 +90,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public bool HasAnchor => CurrentAnchor != null || currentOvrSpatialAnchor != null || sessionAnchorTransform != null;
     public bool HasSavedAnchor => Guid.TryParse(PlayerPrefs.GetString(savedAnchorPlayerPrefsKey, ""), out Guid uuid) && uuid != Guid.Empty;
     public bool LastAnchorWasLoadedSavedAnchor { get; private set; }
+    public Guid CurrentPersistentAnchorUuid => currentOvrSpatialAnchor != null ? currentOvrSpatialAnchor.Uuid : Guid.Empty;
 
     public event Action PlacementStarted;
     public event Action PlacementCanceled;
@@ -653,7 +654,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         currentOvrSpatialAnchor = ovrAnchor;
         LastAnchorWasLoadedSavedAnchor = false;
-        PlayerPrefs.SetString(savedAnchorPlayerPrefsKey, currentOvrSpatialAnchor.Uuid.ToString());
+        PlayerPrefs.SetString(savedAnchorPlayerPrefsKey, CurrentPersistentAnchorUuid.ToString());
         PlayerPrefs.Save();
 
         CreateMarkerUnder(currentOvrSpatialAnchor.transform, "PersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
