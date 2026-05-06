@@ -3922,7 +3922,9 @@ MonoBehaviour:
   alignX: 1
   alignY: 1
   alignZ: 1
-  alignOnStart: 1
+  applyStartupRigOffsetOnStart: 1
+  startupRigWorldOffset: {x: 0, y: -6.5, z: 0}
+  alignOnStart: 0
   waitFramesBeforeAlign: 8
   maxAdditionalWaitFramesForTrackedPose: 120
   minTrackedPoseMagnitude: 0.05
