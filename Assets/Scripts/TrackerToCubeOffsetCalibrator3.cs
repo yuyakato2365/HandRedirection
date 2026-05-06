@@ -90,7 +90,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
     [Header("Targets")]
     [Tooltip("Coordinate space of REL0 packets. Use HeadTracker when REL0 is still measured relative to the head tracker; it will be converted through DSK0 into DeskOrigin space.")]
-    public ObjectPoseSpace objectPoseSpace = ObjectPoseSpace.HeadTracker;
+    public ObjectPoseSpace objectPoseSpace = ObjectPoseSpace.DeskTracker;
 
     [Tooltip("If REL0 is in HeadTracker space, skip object updates until a DSK0 desk-tracker packet has arrived.")]
     public bool requireDeskPoseForHeadTrackerObjects = true;
