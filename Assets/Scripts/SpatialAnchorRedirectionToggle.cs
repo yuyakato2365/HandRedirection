@@ -201,9 +201,19 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     private void OnAnchorTransformCreated(Transform anchorTransform)
     {
         if (deskBinder != null)
-            deskBinder.BeginManualRotationAlignment();
+        {
+            if (placer != null && placer.LastAnchorWasLoadedSavedAnchor)
+            {
+                deskBinder.LoadSavedOffsetFromPrefs();
+                deskBinder.ApplySavedOffsetAsConfirmed();
+            }
+            else
+            {
+                deskBinder.BeginManualRotationAlignment();
+            }
+        }
 
-        if (placer != null && deskBinder != null && deskBinder.requireManualRotationConfirmation)
+        if (placer != null && deskBinder != null && deskBinder.requireManualRotationConfirmation && !placer.LastAnchorWasLoadedSavedAnchor)
             placer.SetStatusMessage("Anchor position applied to deskOrigin\nLeft pinch rotates desk in 3D\nRight pinch confirms rotation");
 
         if (IsSpatialAnchorMode)

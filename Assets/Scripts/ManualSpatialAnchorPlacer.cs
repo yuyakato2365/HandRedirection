@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.XR.ARFoundation;
 using UnityEngine.XR.ARSubsystems;
@@ -24,6 +25,11 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     [Header("AR Anchor")]
     public ARAnchorManager anchorManager;
+    [Tooltip("Use Meta OVRSpatialAnchor for persistent anchors on Quest. Falls back to AR/session anchors if unavailable.")]
+    public bool useOvrSpatialAnchorPersistence = true;
+    public bool loadSavedAnchorOnStart = false;
+    public string savedAnchorPlayerPrefsKey = "HandRedirection.DeskSpatialAnchorUuid";
+    public double savedAnchorLocalizationTimeoutSec = 10.0;
     [Tooltip("Use a Unity-world session anchor when Meta/AR anchors are unavailable, e.g. Quest Link / PCVR.")]
     public bool allowPcvrSessionAnchorFallback = true;
     public float anchorCreateTimeoutSec = 4f;
@@ -72,10 +78,14 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public KeyCode cancelKey = KeyCode.Escape;
 
     public ARAnchor CurrentAnchor { get; private set; }
-    public Transform CurrentAnchorTransform => CurrentAnchor != null ? CurrentAnchor.transform : sessionAnchorTransform;
+    public Transform CurrentAnchorTransform => CurrentAnchor != null
+        ? CurrentAnchor.transform
+        : (currentOvrSpatialAnchor != null ? currentOvrSpatialAnchor.transform : sessionAnchorTransform);
     public bool IsPlacementMode { get; private set; }
     public bool IsCreatingAnchor => isCreatingAnchor;
-    public bool HasAnchor => CurrentAnchor != null || sessionAnchorTransform != null;
+    public bool HasAnchor => CurrentAnchor != null || currentOvrSpatialAnchor != null || sessionAnchorTransform != null;
+    public bool HasSavedAnchor => Guid.TryParse(PlayerPrefs.GetString(savedAnchorPlayerPrefsKey, ""), out Guid uuid) && uuid != Guid.Empty;
+    public bool LastAnchorWasLoadedSavedAnchor { get; private set; }
 
     public event Action PlacementStarted;
     public event Action PlacementCanceled;
@@ -86,10 +96,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     private Pose candidatePose;
     private GameObject anchorMarkerInstance;
+    private OVRSpatialAnchor currentOvrSpatialAnchor;
     private Transform sessionAnchorTransform;
     private bool wasPinching;
     private string placementStatusHint = "";
     private bool isCreatingAnchor;
+    private bool isCreatingPersistentOvrAnchor;
     private float anchorCreateStartTime;
 
     private void Awake()
@@ -102,6 +114,9 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         TryAutoAssignHand();
         SetPreviewActive(false);
         SetStatusMessage("Anchor placer ready");
+
+        if (loadSavedAnchorOnStart)
+            LoadSavedAnchor();
     }
 
     private void Update()
@@ -109,8 +124,11 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (isCreatingAnchor)
         {
             float elapsed = Time.realtimeSinceStartup - anchorCreateStartTime;
-            SetStatusMessage($"Creating Spatial Anchor...\nWaiting {elapsed:0.0}s");
-            if (elapsed >= anchorCreateTimeoutSec)
+            SetStatusMessage(isCreatingPersistentOvrAnchor
+                ? $"Saving persistent Spatial Anchor...\nWaiting {elapsed:0.0}s"
+                : $"Creating Spatial Anchor...\nWaiting {elapsed:0.0}s");
+
+            if (!isCreatingPersistentOvrAnchor && elapsed >= anchorCreateTimeoutSec)
             {
                 isCreatingAnchor = false;
                 if (allowPcvrSessionAnchorFallback)
@@ -204,6 +222,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         isCreatingAnchor = true;
         anchorCreateStartTime = Time.realtimeSinceStartup;
 
+        if (useOvrSpatialAnchorPersistence)
+        {
+            await CreateAndSaveOvrSpatialAnchorAsync();
+            return;
+        }
+
         if (anchorManager == null)
         {
             isCreatingAnchor = false;
@@ -242,10 +266,84 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         }
 
         CurrentAnchor = result.value;
+        LastAnchorWasLoadedSavedAnchor = false;
         AttachOrCreateMarker();
         SetStatusMessage("Spatial Anchor created");
         AnchorCreated?.Invoke(CurrentAnchor);
         AnchorTransformCreated?.Invoke(CurrentAnchor.transform);
+    }
+
+    public async void LoadSavedAnchor()
+    {
+        if (!useOvrSpatialAnchorPersistence)
+        {
+            SetStatusMessage("OVR Spatial Anchor persistence is disabled");
+            return;
+        }
+
+        string savedUuid = PlayerPrefs.GetString(savedAnchorPlayerPrefsKey, "");
+        if (!Guid.TryParse(savedUuid, out Guid uuid) || uuid == Guid.Empty)
+        {
+            SetStatusMessage("No saved Spatial Anchor UUID");
+            return;
+        }
+
+        SetStatusMessage("Loading saved Spatial Anchor...");
+        List<OVRSpatialAnchor.UnboundAnchor> unboundAnchors = new List<OVRSpatialAnchor.UnboundAnchor>();
+        var loadResult = await OVRSpatialAnchor.LoadUnboundAnchorsAsync(new[] { uuid }, unboundAnchors);
+        if (!loadResult.Success || unboundAnchors.Count == 0)
+        {
+            SetStatusMessage($"Saved Spatial Anchor load failed\n{loadResult.Status}");
+            AnchorCreateFailed?.Invoke(loadResult.Status.ToString());
+            return;
+        }
+
+        OVRSpatialAnchor.UnboundAnchor unboundAnchor = unboundAnchors[0];
+        bool localized = await unboundAnchor.LocalizeAsync(savedAnchorLocalizationTimeoutSec);
+        if (!localized)
+        {
+            SetStatusMessage("Saved Spatial Anchor localization failed");
+            AnchorCreateFailed?.Invoke("Saved Spatial Anchor localization failed");
+            return;
+        }
+
+        ClearRuntimeAnchors();
+
+        GameObject anchorObject = new GameObject("LoadedPersistentDeskAnchor");
+        if (unboundAnchor.TryGetPose(out Pose anchorPose))
+            anchorObject.transform.SetPositionAndRotation(anchorPose.position, anchorPose.rotation);
+        OVRSpatialAnchor ovrAnchor = anchorObject.AddComponent<OVRSpatialAnchor>();
+        unboundAnchor.BindTo(ovrAnchor);
+        currentOvrSpatialAnchor = ovrAnchor;
+        LastAnchorWasLoadedSavedAnchor = true;
+
+        CreateMarkerUnder(currentOvrSpatialAnchor.transform, "LoadedPersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
+        SetStatusMessage("Saved Spatial Anchor loaded");
+        AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
+    }
+
+    public async void ClearSavedAnchor()
+    {
+        string savedUuid = PlayerPrefs.GetString(savedAnchorPlayerPrefsKey, "");
+        PlayerPrefs.DeleteKey(savedAnchorPlayerPrefsKey);
+        PlayerPrefs.Save();
+
+        if (currentOvrSpatialAnchor != null && currentOvrSpatialAnchor.Created)
+        {
+            var eraseResult = await currentOvrSpatialAnchor.EraseAnchorAsync();
+            if (!eraseResult.Success)
+                Debug.LogWarning($"[ManualSpatialAnchorPlacer] Failed to erase current OVR Spatial Anchor: {eraseResult.Status}");
+        }
+        else if (Guid.TryParse(savedUuid, out Guid uuid) && uuid != Guid.Empty)
+        {
+            var eraseResult = await OVRSpatialAnchor.EraseAnchorsAsync((IEnumerable<OVRSpatialAnchor>)null, new[] { uuid });
+            if (!eraseResult.Success)
+                Debug.LogWarning($"[ManualSpatialAnchorPlacer] Failed to erase saved OVR Spatial Anchor {uuid}: {eraseResult.Status}");
+        }
+
+        ClearRuntimeAnchors();
+        SetStatusMessage("Saved Spatial Anchor cleared");
+        AnchorCleared?.Invoke();
     }
 
     public void ClearAnchor()
@@ -257,6 +355,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         }
 
         ClearSessionAnchor();
+        ClearOvrSpatialAnchor();
 
         if (CurrentAnchor != null && anchorManager != null)
         {
@@ -500,6 +599,62 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         CreateMarkerUnder(CurrentAnchor.transform, "SpatialAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
     }
 
+    private async System.Threading.Tasks.Task CreateAndSaveOvrSpatialAnchorAsync()
+    {
+        isCreatingPersistentOvrAnchor = true;
+        ClearRuntimeAnchors();
+
+        GameObject anchorObject = new GameObject("PersistentDeskAnchor");
+        anchorObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+        OVRSpatialAnchor ovrAnchor = anchorObject.AddComponent<OVRSpatialAnchor>();
+
+        bool localized = await ovrAnchor.WhenLocalizedAsync();
+        if (!isCreatingAnchor)
+        {
+            if (ovrAnchor != null)
+                Destroy(ovrAnchor.gameObject);
+            isCreatingPersistentOvrAnchor = false;
+            return;
+        }
+
+        if (!localized || ovrAnchor == null || !ovrAnchor.Created)
+        {
+            isCreatingAnchor = false;
+            isCreatingPersistentOvrAnchor = false;
+            if (ovrAnchor != null)
+                Destroy(ovrAnchor.gameObject);
+            FailAnchorCreation("OVR Spatial Anchor creation/localization failed.");
+            return;
+        }
+
+        var saveResult = await ovrAnchor.SaveAnchorAsync();
+        if (!isCreatingAnchor)
+        {
+            if (ovrAnchor != null)
+                Destroy(ovrAnchor.gameObject);
+            isCreatingPersistentOvrAnchor = false;
+            return;
+        }
+
+        isCreatingAnchor = false;
+        isCreatingPersistentOvrAnchor = false;
+        if (!saveResult.Success)
+        {
+            Destroy(ovrAnchor.gameObject);
+            FailAnchorCreation($"OVR Spatial Anchor save failed: {saveResult.Status}");
+            return;
+        }
+
+        currentOvrSpatialAnchor = ovrAnchor;
+        LastAnchorWasLoadedSavedAnchor = false;
+        PlayerPrefs.SetString(savedAnchorPlayerPrefsKey, currentOvrSpatialAnchor.Uuid.ToString());
+        PlayerPrefs.Save();
+
+        CreateMarkerUnder(currentOvrSpatialAnchor.transform, "PersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
+        SetStatusMessage("Persistent Spatial Anchor saved");
+        AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
+    }
+
     private void FailAnchorCreation(string reason)
     {
         Debug.LogError($"[ManualSpatialAnchorPlacer] Failed to create anchor: {reason}");
@@ -516,10 +671,41 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         GameObject sessionAnchor = new GameObject("PCVRSessionAnchor");
         sessionAnchor.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
         sessionAnchorTransform = sessionAnchor.transform;
+        LastAnchorWasLoadedSavedAnchor = false;
 
         CreateMarkerUnder(sessionAnchorTransform, "PCVRSessionAnchorMarker", new Color(0.1f, 0.75f, 1f, 1f));
         SetStatusMessage($"PCVR session anchor created\n{reason}");
         AnchorTransformCreated?.Invoke(sessionAnchorTransform);
+    }
+
+    private void ClearRuntimeAnchors()
+    {
+        if (anchorMarkerInstance != null)
+        {
+            Destroy(anchorMarkerInstance);
+            anchorMarkerInstance = null;
+        }
+
+        ClearSessionAnchor();
+        ClearOvrSpatialAnchor();
+
+        if (CurrentAnchor != null && anchorManager != null)
+        {
+            anchorManager.TryRemoveAnchor(CurrentAnchor);
+            CurrentAnchor = null;
+        }
+
+        LastAnchorWasLoadedSavedAnchor = false;
+    }
+
+    private void ClearOvrSpatialAnchor()
+    {
+        if (currentOvrSpatialAnchor == null)
+            return;
+
+        Destroy(currentOvrSpatialAnchor.gameObject);
+        currentOvrSpatialAnchor = null;
+        LastAnchorWasLoadedSavedAnchor = false;
     }
 
     private void CreateMarkerUnder(Transform parent, string markerName, Color fallbackColor)

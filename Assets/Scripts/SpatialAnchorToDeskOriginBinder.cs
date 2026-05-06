@@ -18,6 +18,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [Header("Offset From Anchor To Desk Origin")]
     public Vector3 localPositionOffset = Vector3.zero;
     public Vector3 localEulerOffset = Vector3.zero;
+    public bool persistOffsetInPlayerPrefs = true;
+    public string savedOffsetPlayerPrefsKey = "HandRedirection.DeskAnchorOffset";
 
     [Header("Manual Rotation Alignment")]
     public bool requireManualRotationConfirmation = true;
@@ -89,6 +91,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AutoAssignPinchProviders();
         AutoAssignHands();
         AutoAssignLeftWrist();
+        LoadSavedOffsetFromPrefs();
         LogAlignmentEvent($"Awake {BuildSourceDebugString()}");
     }
 
@@ -210,6 +213,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         IsAlignmentConfirmed = true;
         ApplyNow();
+        CaptureCurrentDeskAsOffset();
+        SaveCurrentOffsetToPrefs();
+        initialAlignmentRotation = GetCurrentTargetRotation(Quaternion.identity);
+        yawAdjustmentDegrees = 0f;
+        handRotationAdjustment = Quaternion.identity;
         LogAlignmentEvent($"ConfirmManualRotationAlignment finalDesk={FormatTransform(deskOrigin)} handAdjustment={FormatRotation(handRotationAdjustment)} yaw={yawAdjustmentDegrees:0.###}");
         AlignmentConfirmed?.Invoke();
     }
@@ -238,6 +246,79 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         localPositionOffset = Quaternion.Inverse(anchor.rotation) * (target.position - anchor.position);
         localEulerOffset = (Quaternion.Inverse(anchor.rotation) * target.rotation).eulerAngles;
+    }
+
+    public bool LoadSavedOffsetFromPrefs()
+    {
+        if (!persistOffsetInPlayerPrefs || string.IsNullOrEmpty(savedOffsetPlayerPrefsKey))
+            return false;
+
+        string json = PlayerPrefs.GetString(savedOffsetPlayerPrefsKey, "");
+        if (string.IsNullOrWhiteSpace(json))
+            return false;
+
+        try
+        {
+            SavedDeskAnchorOffset saved = JsonUtility.FromJson<SavedDeskAnchorOffset>(json);
+            localPositionOffset = saved.localPositionOffset;
+            localEulerOffset = saved.localEulerOffset;
+            LogAlignmentEvent($"Loaded saved desk offset pos={localPositionOffset} euler={localEulerOffset}");
+            return true;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[SpatialAnchorToDeskOriginBinder] Failed to load saved desk offset: {e.Message}");
+            return false;
+        }
+    }
+
+    public void SaveCurrentOffsetToPrefs()
+    {
+        if (!persistOffsetInPlayerPrefs || string.IsNullOrEmpty(savedOffsetPlayerPrefsKey))
+            return;
+
+        SavedDeskAnchorOffset saved = new SavedDeskAnchorOffset
+        {
+            localPositionOffset = localPositionOffset,
+            localEulerOffset = localEulerOffset
+        };
+        PlayerPrefs.SetString(savedOffsetPlayerPrefsKey, JsonUtility.ToJson(saved));
+        PlayerPrefs.Save();
+        LogAlignmentEvent($"Saved desk offset pos={localPositionOffset} euler={localEulerOffset}");
+    }
+
+    public void ClearSavedOffsetPrefs()
+    {
+        if (string.IsNullOrEmpty(savedOffsetPlayerPrefsKey))
+            return;
+
+        PlayerPrefs.DeleteKey(savedOffsetPlayerPrefsKey);
+        PlayerPrefs.Save();
+    }
+
+    public void ApplySavedOffsetAsConfirmed()
+    {
+        AutoAssignTargets();
+
+        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
+        if (anchor == null)
+            return;
+
+        initialAlignmentRotation = anchor.rotation * Quaternion.Euler(localEulerOffset);
+        yawAdjustmentDegrees = 0f;
+        handRotationAdjustment = Quaternion.identity;
+        HasAlignmentState = true;
+        IsAlignmentConfirmed = true;
+        ApplyNow();
+        LogAlignmentEvent($"ApplySavedOffsetAsConfirmed desk={FormatTransform(deskOrigin)}");
+        AlignmentConfirmed?.Invoke();
+    }
+
+    [Serializable]
+    private struct SavedDeskAnchorOffset
+    {
+        public Vector3 localPositionOffset;
+        public Vector3 localEulerOffset;
     }
 
     private static void ApplyPose(Transform target, Vector3 position, Quaternion rotation)

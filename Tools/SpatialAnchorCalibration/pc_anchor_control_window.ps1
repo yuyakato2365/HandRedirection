@@ -73,7 +73,7 @@ function Poll-Status {
 
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = "Spatial Anchor Calibration Control"
-$form.Size = [System.Drawing.Size]::new(560, 650)
+$form.Size = [System.Drawing.Size]::new(560, 700)
 $form.StartPosition = "CenterScreen"
 
 $ipLabel = [System.Windows.Forms.Label]::new()
@@ -146,15 +146,33 @@ $clearButton.Add_Click({
 })
 $form.Controls.Add($clearButton)
 
+$loadSavedButton = [System.Windows.Forms.Button]::new()
+$loadSavedButton.Text = "Load Saved Anchor"
+$loadSavedButton.Location = [System.Drawing.Point]::new(16, 284)
+$loadSavedButton.Size = [System.Drawing.Size]::new(248, 34)
+$loadSavedButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "LOAD_SAVED_ANCHOR"
+})
+$form.Controls.Add($loadSavedButton)
+
+$clearSavedButton = [System.Windows.Forms.Button]::new()
+$clearSavedButton.Text = "Clear Saved Anchor"
+$clearSavedButton.Location = [System.Drawing.Point]::new(278, 284)
+$clearSavedButton.Size = [System.Drawing.Size]::new(248, 34)
+$clearSavedButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "CLEAR_SAVED_ANCHOR"
+})
+$form.Controls.Add($clearSavedButton)
+
 $deskAngleLabel = [System.Windows.Forms.Label]::new()
 $deskAngleLabel.Text = "Desk Angle Adjustment"
-$deskAngleLabel.Location = [System.Drawing.Point]::new(16, 292)
+$deskAngleLabel.Location = [System.Drawing.Point]::new(16, 336)
 $deskAngleLabel.Size = [System.Drawing.Size]::new(220, 22)
 $form.Controls.Add($deskAngleLabel)
 
 $rotateLeftLargeButton = [System.Windows.Forms.Button]::new()
 $rotateLeftLargeButton.Text = "-5 deg"
-$rotateLeftLargeButton.Location = [System.Drawing.Point]::new(16, 318)
+$rotateLeftLargeButton.Location = [System.Drawing.Point]::new(16, 362)
 $rotateLeftLargeButton.Size = [System.Drawing.Size]::new(118, 34)
 $rotateLeftLargeButton.Add_Click({
     Send-QuestCommand $ipBox.Text "ROTATE_DESK_LEFT_LARGE"
@@ -163,7 +181,7 @@ $form.Controls.Add($rotateLeftLargeButton)
 
 $rotateLeftButton = [System.Windows.Forms.Button]::new()
 $rotateLeftButton.Text = "-1 deg"
-$rotateLeftButton.Location = [System.Drawing.Point]::new(146, 318)
+$rotateLeftButton.Location = [System.Drawing.Point]::new(146, 362)
 $rotateLeftButton.Size = [System.Drawing.Size]::new(118, 34)
 $rotateLeftButton.Add_Click({
     Send-QuestCommand $ipBox.Text "ROTATE_DESK_LEFT"
@@ -172,7 +190,7 @@ $form.Controls.Add($rotateLeftButton)
 
 $rotateRightButton = [System.Windows.Forms.Button]::new()
 $rotateRightButton.Text = "+1 deg"
-$rotateRightButton.Location = [System.Drawing.Point]::new(278, 318)
+$rotateRightButton.Location = [System.Drawing.Point]::new(278, 362)
 $rotateRightButton.Size = [System.Drawing.Size]::new(118, 34)
 $rotateRightButton.Add_Click({
     Send-QuestCommand $ipBox.Text "ROTATE_DESK_RIGHT"
@@ -181,7 +199,7 @@ $form.Controls.Add($rotateRightButton)
 
 $rotateRightLargeButton = [System.Windows.Forms.Button]::new()
 $rotateRightLargeButton.Text = "+5 deg"
-$rotateRightLargeButton.Location = [System.Drawing.Point]::new(408, 318)
+$rotateRightLargeButton.Location = [System.Drawing.Point]::new(408, 362)
 $rotateRightLargeButton.Size = [System.Drawing.Size]::new(118, 34)
 $rotateRightLargeButton.Add_Click({
     Send-QuestCommand $ipBox.Text "ROTATE_DESK_RIGHT_LARGE"
@@ -190,7 +208,7 @@ $form.Controls.Add($rotateRightLargeButton)
 
 $resetDeskYawButton = [System.Windows.Forms.Button]::new()
 $resetDeskYawButton.Text = "Reset Desk Angle"
-$resetDeskYawButton.Location = [System.Drawing.Point]::new(16, 362)
+$resetDeskYawButton.Location = [System.Drawing.Point]::new(16, 406)
 $resetDeskYawButton.Size = [System.Drawing.Size]::new(248, 34)
 $resetDeskYawButton.Add_Click({
     Send-QuestCommand $ipBox.Text "RESET_DESK_ROTATION"
@@ -199,7 +217,7 @@ $form.Controls.Add($resetDeskYawButton)
 
 $confirmDeskAlignmentButton = [System.Windows.Forms.Button]::new()
 $confirmDeskAlignmentButton.Text = "Confirm Desk Alignment"
-$confirmDeskAlignmentButton.Location = [System.Drawing.Point]::new(278, 362)
+$confirmDeskAlignmentButton.Location = [System.Drawing.Point]::new(278, 406)
 $confirmDeskAlignmentButton.Size = [System.Drawing.Size]::new(248, 34)
 $confirmDeskAlignmentButton.Add_Click({
     Send-QuestCommand $ipBox.Text "CONFIRM_DESK_ALIGNMENT"
@@ -210,7 +228,7 @@ $statusTitle = [System.Windows.Forms.Label]::new()
 $statusTitle.Text = "Status"
 $enableButton = [System.Windows.Forms.Button]::new()
 $enableButton.Text = "Use Spatial Anchor Mode"
-$enableButton.Location = [System.Drawing.Point]::new(16, 414)
+$enableButton.Location = [System.Drawing.Point]::new(16, 458)
 $enableButton.Size = [System.Drawing.Size]::new(248, 34)
 $enableButton.Add_Click({
     Send-QuestCommand $ipBox.Text "USE_SPATIAL_ANCHOR_REDIRECTION"
@@ -219,21 +237,21 @@ $form.Controls.Add($enableButton)
 
 $disableButton = [System.Windows.Forms.Button]::new()
 $disableButton.Text = "Restore Original Mode"
-$disableButton.Location = [System.Drawing.Point]::new(278, 414)
+$disableButton.Location = [System.Drawing.Point]::new(278, 458)
 $disableButton.Size = [System.Drawing.Size]::new(248, 34)
 $disableButton.Add_Click({
     Send-QuestCommand $ipBox.Text "RESTORE_ORIGINAL_HAND_REDIRECTION"
 })
 $form.Controls.Add($disableButton)
 
-$statusTitle.Location = [System.Drawing.Point]::new(16, 464)
+$statusTitle.Location = [System.Drawing.Point]::new(16, 508)
 $statusTitle.Size = [System.Drawing.Size]::new(80, 24)
 $form.Controls.Add($statusTitle)
 
 $statusLabel = [System.Windows.Forms.Label]::new()
 $statusLabel.Text = "Waiting for status"
 $statusLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D
-$statusLabel.Location = [System.Drawing.Point]::new(16, 490)
+$statusLabel.Location = [System.Drawing.Point]::new(16, 534)
 $statusLabel.Size = [System.Drawing.Size]::new(510, 28)
 $form.Controls.Add($statusLabel)
 
@@ -241,7 +259,7 @@ $logBox = [System.Windows.Forms.TextBox]::new()
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
-$logBox.Location = [System.Drawing.Point]::new(16, 530)
+$logBox.Location = [System.Drawing.Point]::new(16, 574)
 $logBox.Size = [System.Drawing.Size]::new(510, 72)
 $form.Controls.Add($logBox)
 

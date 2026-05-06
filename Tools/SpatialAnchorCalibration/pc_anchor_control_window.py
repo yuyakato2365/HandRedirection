@@ -14,7 +14,7 @@ class AnchorControlWindow:
     def __init__(self, root):
         self.root = root
         self.root.title("Spatial Anchor Calibration Control")
-        self.root.geometry("520x420")
+        self.root.geometry("520x470")
         self.running = True
 
         self.quest_ip = tk.StringVar(value=DEFAULT_QUEST_IP)
@@ -60,11 +60,17 @@ class AnchorControlWindow:
         ttk.Button(button_frame, text="Clear Anchor", command=lambda: self._send("CLEAR_ANCHOR")).grid(
             row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0)
         )
-        ttk.Button(button_frame, text="Use Spatial Anchor Mode", command=lambda: self._send("USE_SPATIAL_ANCHOR_REDIRECTION")).grid(
+        ttk.Button(button_frame, text="Load Saved Anchor", command=lambda: self._send("LOAD_SAVED_ANCHOR")).grid(
             row=3, column=0, sticky="ew", padx=(0, 6), pady=(8, 0)
         )
-        ttk.Button(button_frame, text="Restore Original Mode", command=lambda: self._send("RESTORE_ORIGINAL_HAND_REDIRECTION")).grid(
+        ttk.Button(button_frame, text="Clear Saved Anchor", command=lambda: self._send("CLEAR_SAVED_ANCHOR")).grid(
             row=3, column=1, sticky="ew", padx=(6, 0), pady=(8, 0)
+        )
+        ttk.Button(button_frame, text="Use Spatial Anchor Mode", command=lambda: self._send("USE_SPATIAL_ANCHOR_REDIRECTION")).grid(
+            row=4, column=0, sticky="ew", padx=(0, 6), pady=(8, 0)
+        )
+        ttk.Button(button_frame, text="Restore Original Mode", command=lambda: self._send("RESTORE_ORIGINAL_HAND_REDIRECTION")).grid(
+            row=4, column=1, sticky="ew", padx=(6, 0), pady=(8, 0)
         )
 
         ttk.Label(frame, text="Status").grid(row=3, column=0, columnspan=2, sticky="w", pady=(20, 4))

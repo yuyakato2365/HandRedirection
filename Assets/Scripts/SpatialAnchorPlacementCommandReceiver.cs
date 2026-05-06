@@ -205,6 +205,23 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                 placer.ClearAnchor();
                 SendStatus("ANCHOR_CLEARED");
                 break;
+            case "LOAD_SAVED_ANCHOR":
+            case "LOAD_PERSISTENT_ANCHOR":
+                placer.LoadSavedAnchor();
+                if (featureToggle != null)
+                    featureToggle.UseSpatialAnchorMode();
+                SendStatus("LOAD_SAVED_ANCHOR_REQUESTED");
+                break;
+            case "CLEAR_SAVED_ANCHOR":
+            case "ERASE_SAVED_ANCHOR":
+                placer.ClearSavedAnchor();
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder savedClearBinder))
+                    savedClearBinder.ClearSavedOffsetPrefs();
+                SendStatus("CLEAR_SAVED_ANCHOR_REQUESTED");
+                break;
+            case "HAS_SAVED_ANCHOR":
+                SendStatus(placer.HasSavedAnchor ? "HAS_SAVED_ANCHOR true" : "HAS_SAVED_ANCHOR false");
+                break;
             case "BEGIN_DESK_ROTATION_ADJUSTMENT":
                 if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder beginBinder))
                 {
