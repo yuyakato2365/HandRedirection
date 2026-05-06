@@ -3915,8 +3915,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   anchorPlacer: {fileID: 278646990}
-  deskOrigin: {fileID: 0}
-  trackerDeskTransform: {fileID: 0}
+  deskOrigin: {fileID: 1332633470}
+  trackerDeskTransform: {fileID: 1332633470}
   localPositionOffset: {x: 0, y: 0, z: 0}
   localEulerOffset: {x: 0, y: 0, z: 0}
   requireManualRotationConfirmation: 1
@@ -19498,7 +19498,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1097426980
 MonoBehaviour:
   m_ObjectHideFlags: 0

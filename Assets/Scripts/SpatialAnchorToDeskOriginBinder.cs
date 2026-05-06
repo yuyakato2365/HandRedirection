@@ -46,6 +46,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         if (anchorPlacer == null)
             anchorPlacer = FindAnyObjectByType<ManualSpatialAnchorPlacer>();
+        AutoAssignTargets();
     }
 
     private void Start()
@@ -63,6 +64,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [ContextMenu("Anchor Binder/Apply Now")]
     public void ApplyNow()
     {
+        AutoAssignTargets();
+
         Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
         if (anchor == null)
             return;
@@ -77,6 +80,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [ContextMenu("Anchor Binder/Begin Manual Rotation Alignment")]
     public void BeginManualRotationAlignment()
     {
+        AutoAssignTargets();
+
         Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
         if (anchor == null)
             return;
@@ -203,5 +208,29 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return trackerDeskTransform.rotation;
 
         return fallbackRotation;
+    }
+
+    private void AutoAssignTargets()
+    {
+        if (deskOrigin == null)
+        {
+            GoGoInteractionController_NoY3 goGo = FindAnyObjectByType<GoGoInteractionController_NoY3>();
+            if (goGo != null && goGo.deskOrigin != null)
+                deskOrigin = goGo.deskOrigin;
+        }
+
+        if (deskOrigin == null)
+        {
+            GameObject deskOriginObject = GameObject.Find("DeskOrigin");
+            if (deskOriginObject != null)
+                deskOrigin = deskOriginObject.transform;
+        }
+
+        if (trackerDeskTransform == null)
+        {
+            TrackerToCubeOffsetCalibrator3 tracker = FindAnyObjectByType<TrackerToCubeOffsetCalibrator3>();
+            if (tracker != null)
+                trackerDeskTransform = tracker.deskTransform;
+        }
     }
 }

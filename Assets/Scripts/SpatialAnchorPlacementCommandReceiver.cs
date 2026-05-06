@@ -191,9 +191,9 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         switch (normalized)
         {
             case "BEGIN_ANCHOR_PLACEMENT":
+                placer.BeginPlacement();
                 if (featureToggle != null)
                     featureToggle.UseSpatialAnchorMode();
-                placer.BeginPlacement();
                 break;
             case "CANCEL_ANCHOR_PLACEMENT":
                 placer.CancelPlacement();

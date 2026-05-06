@@ -61,9 +61,12 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     {
         CurrentMode = mode;
         bool spatialMode = mode == RedirectionMode.SpatialAnchor;
+        bool placementActive = placer != null && (placer.IsPlacementMode || placer.IsCreatingAnchor);
         bool anchorReady = HasUsableSpatialAnchor();
-        bool enableSpatialAnchorDrivenRedirection = spatialMode && anchorReady;
-        bool enableHandRedirection = !spatialMode || !disableHandRedirectionUntilAnchorExists || anchorReady;
+        bool suppressRedirectionForPlacement = spatialMode && placementActive;
+        bool enableSpatialAnchorDrivenRedirection = spatialMode && anchorReady && !suppressRedirectionForPlacement;
+        bool enableHandRedirection = !suppressRedirectionForPlacement &&
+                                     (!spatialMode || !disableHandRedirectionUntilAnchorExists || anchorReady);
         bool enableDeskBinder = spatialMode && (anchorReady || (deskBinder != null && deskBinder.IsAdjustingAlignment));
 
         // Keep the command receiver alive so the PC window can always switch modes back.
