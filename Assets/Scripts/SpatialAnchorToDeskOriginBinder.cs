@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 using UnityEngine;
 
@@ -46,6 +47,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool followEveryFrame = true;
     public bool applyOnStart = true;
 
+    [Header("Debug")]
+    public bool logHandAlignmentDebug = true;
+    public bool writeHandAlignmentLogFile = true;
+    public float activePinchLogIntervalSec = 0.25f;
+
     public bool HasAlignmentState { get; private set; }
     public bool IsAlignmentConfirmed { get; private set; }
     public bool IsAdjustingAlignment => HasAlignmentState && !IsAlignmentConfirmed;
@@ -67,6 +73,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private Quaternion handRotationAdjustment = Quaternion.identity;
     private Quaternion handRotationAdjustmentAtLeftPinchStart = Quaternion.identity;
     private Transform leftWristTransform;
+    private float nextActivePinchLogTime;
+    private float nextLeftWristFailureLogTime;
+    private string handAlignmentLogPath;
 
     private void Awake()
     {
@@ -76,6 +85,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AutoAssignPinchProviders();
         AutoAssignHands();
         AutoAssignLeftWrist();
+        LogAlignmentEvent($"Awake {BuildSourceDebugString()}");
     }
 
     private void Start()
@@ -99,7 +109,10 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
         if (anchor == null)
+        {
+            LogAlignmentEvent("BeginManualRotationAlignment ignored: anchor is null");
             return;
+        }
 
         Vector3 targetPos = anchor.TransformPoint(localPositionOffset);
         Quaternion targetRot = ResolveTargetRotation(anchor);
@@ -129,6 +142,10 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         wasRightConfirmPinching = IsRightConfirmPinching();
         waitingForRightConfirmRelease = requireRightPinchReleaseBeforeConfirm;
         ApplyNow();
+        LogAlignmentEvent(
+            $"BeginManualRotationAlignment initial={FormatRotation(initialAlignmentRotation)} " +
+            $"leftPinch={wasLeftRotationPinching} rightPinch={wasRightConfirmPinching} " +
+            $"waitingRightRelease={waitingForRightConfirmRelease} {BuildSourceDebugString()}");
 
         if (IsAlignmentConfirmed)
             AlignmentConfirmed?.Invoke();
@@ -188,6 +205,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         IsAlignmentConfirmed = true;
         ApplyNow();
+        LogAlignmentEvent($"ConfirmManualRotationAlignment finalDesk={FormatTransform(deskOrigin)} handAdjustment={FormatRotation(handRotationAdjustment)} yaw={yawAdjustmentDegrees:0.###}");
         AlignmentConfirmed?.Invoke();
     }
 
@@ -200,6 +218,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         wasLeftRotationPinching = false;
         wasRightConfirmPinching = false;
         waitingForRightConfirmRelease = false;
+        LogAlignmentEvent("ClearAlignmentState");
         AlignmentCleared?.Invoke();
     }
 
@@ -239,12 +258,18 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AutoAssignLeftWrist();
 
         bool leftPinching = IsLeftRotationPinching();
+        if (leftPinching != wasLeftRotationPinching)
+            LogAlignmentEvent($"Left pinch changed {wasLeftRotationPinching} -> {leftPinching} {BuildPinchDebugString()}");
+
         if (leftPinching && !wasLeftRotationPinching)
         {
             leftPinchStartYawDegrees = GetHandYawDegrees(leftRotationHand);
             yawAdjustmentAtLeftPinchStart = yawAdjustmentDegrees;
             leftPinchStartRotation = GetLeftRotationAlignmentRotation();
             handRotationAdjustmentAtLeftPinchStart = handRotationAdjustment;
+            LogAlignmentEvent(
+                $"Left pinch start wrist={FormatTransform(leftWristTransform)} " +
+                $"startRot={FormatRotation(leftPinchStartRotation)} carryAdjustment={FormatRotation(handRotationAdjustmentAtLeftPinchStart)}");
         }
         else if (leftPinching)
         {
@@ -252,6 +277,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             {
                 Quaternion deltaRotation = GetLeftRotationAlignmentRotation() * Quaternion.Inverse(leftPinchStartRotation);
                 handRotationAdjustment = deltaRotation * handRotationAdjustmentAtLeftPinchStart;
+                LogActivePinchFrame(deltaRotation);
             }
             else
             {
@@ -270,13 +296,20 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         wasLeftRotationPinching = leftPinching;
 
         bool rightPinching = IsRightConfirmPinching();
+        if (rightPinching != wasRightConfirmPinching)
+            LogAlignmentEvent($"Right pinch changed {wasRightConfirmPinching} -> {rightPinching} {BuildPinchDebugString()} waitingRightRelease={waitingForRightConfirmRelease}");
+
         if (waitingForRightConfirmRelease)
         {
             if (!rightPinching)
+            {
                 waitingForRightConfirmRelease = false;
+                LogAlignmentEvent("Right confirm release observed; next right pinch will confirm rotation");
+            }
         }
         else if (rightPinching && !wasRightConfirmPinching)
         {
+            LogAlignmentEvent("Right confirm pinch detected");
             ConfirmManualRotationAlignment();
         }
 
@@ -404,9 +437,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
                 continue;
 
             if (leftRotationHand == null && IsLikelyHandedness(hand, true))
+            {
                 leftRotationHand = hand;
+                LogAlignmentEvent($"Auto-assigned leftRotationHand={hand.name}");
+            }
             else if (rightConfirmHand == null && IsLikelyHandedness(hand, false))
+            {
                 rightConfirmHand = hand;
+                LogAlignmentEvent($"Auto-assigned rightConfirmHand={hand.name}");
+            }
         }
     }
 
@@ -434,9 +473,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
                 continue;
 
             if (leftRotationPinchProvider == null && IsLikelyHandedness(provider.ovrHand, true))
+            {
                 leftRotationPinchProvider = provider;
+                LogAlignmentEvent($"Auto-assigned leftRotationPinchProvider={provider.name} ovrHand={provider.ovrHand.name}");
+            }
             else if (rightConfirmPinchProvider == null && IsLikelyHandedness(provider.ovrHand, false))
+            {
                 rightConfirmPinchProvider = provider;
+                LogAlignmentEvent($"Auto-assigned rightConfirmPinchProvider={provider.name} ovrHand={provider.ovrHand.name}");
+            }
         }
     }
 
@@ -496,15 +541,131 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         OVRSkeleton skeleton = leftRotationHand.GetComponent<OVRSkeleton>();
         if (skeleton == null || skeleton.Bones == null)
+        {
+            LogLeftWristFailure($"AutoAssignLeftWrist failed: skeleton/bones missing on {leftRotationHand.name}");
             return;
+        }
 
         foreach (var bone in skeleton.Bones)
         {
             if (bone.Id == OVRSkeleton.BoneId.Hand_WristRoot && bone.Transform != null)
             {
                 leftWristTransform = bone.Transform;
+                LogAlignmentEvent($"Auto-assigned left wrist transform={leftWristTransform.name} path={GetTransformPath(leftWristTransform)}");
                 return;
             }
         }
+
+        LogLeftWristFailure($"AutoAssignLeftWrist failed: Hand_WristRoot not found on {leftRotationHand.name}");
+    }
+
+    private void LogLeftWristFailure(string message)
+    {
+        if (Time.realtimeSinceStartup < nextLeftWristFailureLogTime)
+            return;
+
+        nextLeftWristFailureLogTime = Time.realtimeSinceStartup + 1f;
+        LogAlignmentEvent(message);
+    }
+
+    private void LogActivePinchFrame(Quaternion deltaRotation)
+    {
+        if (!logHandAlignmentDebug || Time.realtimeSinceStartup < nextActivePinchLogTime)
+            return;
+
+        nextActivePinchLogTime = Time.realtimeSinceStartup + activePinchLogIntervalSec;
+        LogAlignmentEvent(
+            $"Left pinch active current={FormatRotation(GetLeftRotationAlignmentRotation())} " +
+            $"delta={FormatRotation(deltaRotation)} handAdjustment={FormatRotation(handRotationAdjustment)} " +
+            $"desk={FormatTransform(deskOrigin)} trackerDesk={FormatTransform(trackerDeskTransform)}");
+    }
+
+    private void LogAlignmentEvent(string message)
+    {
+        if (!logHandAlignmentDebug)
+            return;
+
+        string line = $"[SpatialAnchorHandAlignment t={Time.realtimeSinceStartup:0.000}] {message}";
+        Debug.Log(line);
+
+        if (!writeHandAlignmentLogFile)
+            return;
+
+        try
+        {
+            if (string.IsNullOrEmpty(handAlignmentLogPath))
+            {
+                string logDirectory = Path.GetFullPath(Path.Combine(Application.dataPath, "../Logs"));
+                Directory.CreateDirectory(logDirectory);
+                handAlignmentLogPath = Path.Combine(logDirectory, "SpatialAnchorHandAlignment.log");
+                File.AppendAllText(handAlignmentLogPath, $"{Environment.NewLine}--- Session {DateTime.Now:yyyy-MM-dd HH:mm:ss} ---{Environment.NewLine}");
+            }
+
+            File.AppendAllText(handAlignmentLogPath, line + Environment.NewLine);
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[SpatialAnchorHandAlignment] Failed to write log file: {e.Message}");
+            writeHandAlignmentLogFile = false;
+        }
+    }
+
+    private string BuildSourceDebugString()
+    {
+        return $"leftProvider={GetObjectName(leftRotationPinchProvider)} rightProvider={GetObjectName(rightConfirmPinchProvider)} " +
+               $"leftHand={GetObjectName(leftRotationHand)} rightHand={GetObjectName(rightConfirmHand)} " +
+               $"leftWrist={GetObjectName(leftWristTransform)} desk={GetObjectName(deskOrigin)} trackerDesk={GetObjectName(trackerDeskTransform)}";
+    }
+
+    private string BuildPinchDebugString()
+    {
+        return $"leftProviderPinch={GetProviderPinchDebug(leftRotationPinchProvider)} rightProviderPinch={GetProviderPinchDebug(rightConfirmPinchProvider)} " +
+               $"leftHandTracked={GetHandTrackedDebug(leftRotationHand)} rightHandTracked={GetHandTrackedDebug(rightConfirmHand)}";
+    }
+
+    private static string GetProviderPinchDebug(PinchProvider provider)
+    {
+        return provider != null ? $"{provider.name}:{provider.IsPinching}/{provider.PinchStrength:0.###}" : "null";
+    }
+
+    private static string GetHandTrackedDebug(OVRHand hand)
+    {
+        return hand != null ? $"{hand.name}:{hand.IsTracked}" : "null";
+    }
+
+    private static string GetObjectName(UnityEngine.Object obj)
+    {
+        return obj != null ? obj.name : "null";
+    }
+
+    private static string FormatRotation(Quaternion rotation)
+    {
+        Vector3 euler = rotation.eulerAngles;
+        return $"quat({rotation.x:0.###},{rotation.y:0.###},{rotation.z:0.###},{rotation.w:0.###}) euler({euler.x:0.###},{euler.y:0.###},{euler.z:0.###})";
+    }
+
+    private static string FormatTransform(Transform transform)
+    {
+        if (transform == null)
+            return "null";
+
+        Vector3 position = transform.position;
+        return $"{transform.name} pos({position.x:0.###},{position.y:0.###},{position.z:0.###}) rot={FormatRotation(transform.rotation)}";
+    }
+
+    private static string GetTransformPath(Transform transform)
+    {
+        if (transform == null)
+            return "null";
+
+        string path = transform.name;
+        Transform parent = transform.parent;
+        while (parent != null)
+        {
+            path = parent.name + "/" + path;
+            parent = parent.parent;
+        }
+
+        return path;
     }
 }
