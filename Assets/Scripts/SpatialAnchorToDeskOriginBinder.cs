@@ -30,6 +30,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool enableHandRotationAlignment = true;
     public OVRHand leftRotationHand;
     public OVRHand rightConfirmHand;
+    public PinchProvider leftRotationPinchProvider;
+    public PinchProvider rightConfirmPinchProvider;
     public OVRHand.HandFinger rotationFinger = OVRHand.HandFinger.Index;
     public OVRHand.HandFinger confirmFinger = OVRHand.HandFinger.Index;
     [Range(0f, 1f)] public float pinchStartThreshold = 0.7f;
@@ -71,6 +73,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (anchorPlacer == null)
             anchorPlacer = FindAnyObjectByType<ManualSpatialAnchorPlacer>();
         AutoAssignTargets();
+        AutoAssignPinchProviders();
         AutoAssignHands();
         AutoAssignLeftWrist();
     }
@@ -232,6 +235,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
 
         AutoAssignHands();
+        AutoAssignPinchProviders();
         AutoAssignLeftWrist();
 
         bool leftPinching = IsLeftRotationPinching();
@@ -302,11 +306,17 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private bool IsLeftRotationPinching()
     {
+        if (leftRotationPinchProvider != null)
+            return leftRotationPinchProvider.IsPinching;
+
         return IsHandPinching(leftRotationHand, rotationFinger);
     }
 
     private bool IsRightConfirmPinching()
     {
+        if (rightConfirmPinchProvider != null)
+            return rightConfirmPinchProvider.IsPinching;
+
         return IsHandPinching(rightConfirmHand, confirmFinger);
     }
 
@@ -378,6 +388,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void AutoAssignHands()
     {
+        AutoAssignHandsFromPinchProviders();
+
         if (!autoFindAlignmentHands || (leftRotationHand != null && rightConfirmHand != null))
             return;
 
@@ -395,6 +407,36 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
                 leftRotationHand = hand;
             else if (rightConfirmHand == null && IsLikelyHandedness(hand, false))
                 rightConfirmHand = hand;
+        }
+    }
+
+    private void AutoAssignHandsFromPinchProviders()
+    {
+        if (leftRotationHand == null && leftRotationPinchProvider != null)
+            leftRotationHand = leftRotationPinchProvider.ovrHand;
+        if (rightConfirmHand == null && rightConfirmPinchProvider != null)
+            rightConfirmHand = rightConfirmPinchProvider.ovrHand;
+    }
+
+    private void AutoAssignPinchProviders()
+    {
+        if (!autoFindAlignmentHands || (leftRotationPinchProvider != null && rightConfirmPinchProvider != null))
+            return;
+
+        PinchProvider[] providers = FindObjectsByType<PinchProvider>(FindObjectsSortMode.None);
+        if (providers == null)
+            return;
+
+        for (int i = 0; i < providers.Length; i++)
+        {
+            PinchProvider provider = providers[i];
+            if (provider == null || provider.ovrHand == null)
+                continue;
+
+            if (leftRotationPinchProvider == null && IsLikelyHandedness(provider.ovrHand, true))
+                leftRotationPinchProvider = provider;
+            else if (rightConfirmPinchProvider == null && IsLikelyHandedness(provider.ovrHand, false))
+                rightConfirmPinchProvider = provider;
         }
     }
 
