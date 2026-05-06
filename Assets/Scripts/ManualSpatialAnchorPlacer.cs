@@ -30,6 +30,10 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public bool loadSavedAnchorOnStart = false;
     public string savedAnchorPlayerPrefsKey = "HandRedirection.DeskSpatialAnchorUuid";
     public double savedAnchorLocalizationTimeoutSec = 10.0;
+    public float savedAnchorStabilizeSeconds = 0.75f;
+    public float savedAnchorMaxStabilizeWaitSeconds = 3.0f;
+    public float savedAnchorStablePositionThresholdMeters = 0.003f;
+    public float savedAnchorStableRotationThresholdDegrees = 0.25f;
     [Tooltip("Use a Unity-world session anchor when Meta/AR anchors are unavailable, e.g. Quest Link / PCVR.")]
     public bool allowPcvrSessionAnchorFallback = true;
     public float anchorCreateTimeoutSec = 4f;
@@ -318,6 +322,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         LastAnchorWasLoadedSavedAnchor = true;
 
         CreateMarkerUnder(currentOvrSpatialAnchor.transform, "LoadedPersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
+        SetStatusMessage("Saved Spatial Anchor localized\nWaiting for stable pose...");
+        await WaitForLoadedAnchorPoseStableAsync(currentOvrSpatialAnchor.transform);
         SetStatusMessage("Saved Spatial Anchor loaded");
         AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
     }
@@ -653,6 +659,47 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         CreateMarkerUnder(currentOvrSpatialAnchor.transform, "PersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
         SetStatusMessage("Persistent Spatial Anchor saved");
         AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
+    }
+
+    private async System.Threading.Tasks.Task WaitForLoadedAnchorPoseStableAsync(Transform anchorTransform)
+    {
+        if (anchorTransform == null || savedAnchorStabilizeSeconds <= 0f)
+            return;
+
+        float startTime = Time.realtimeSinceStartup;
+        float stableStartTime = Time.realtimeSinceStartup;
+        Vector3 lastPosition = anchorTransform.position;
+        Quaternion lastRotation = anchorTransform.rotation;
+
+        while (anchorTransform != null)
+        {
+            await System.Threading.Tasks.Task.Yield();
+            if (anchorTransform == null)
+                return;
+
+            float now = Time.realtimeSinceStartup;
+            if (now - startTime >= savedAnchorMaxStabilizeWaitSeconds)
+                return;
+
+            float positionDelta = Vector3.Distance(anchorTransform.position, lastPosition);
+            float rotationDelta = Quaternion.Angle(anchorTransform.rotation, lastRotation);
+            bool stable = positionDelta <= savedAnchorStablePositionThresholdMeters &&
+                          rotationDelta <= savedAnchorStableRotationThresholdDegrees;
+
+            if (!stable)
+            {
+                stableStartTime = now;
+                lastPosition = anchorTransform.position;
+                lastRotation = anchorTransform.rotation;
+                continue;
+            }
+
+            if (now - stableStartTime >= savedAnchorStabilizeSeconds)
+                return;
+
+            lastPosition = anchorTransform.position;
+            lastRotation = anchorTransform.rotation;
+        }
     }
 
     private void FailAnchorCreation(string reason)
