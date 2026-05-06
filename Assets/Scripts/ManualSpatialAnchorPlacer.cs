@@ -272,7 +272,20 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     {
         placementStatusHint = message;
         if (statusText != null)
+        {
+            statusText.gameObject.SetActive(!string.IsNullOrEmpty(message));
             statusText.text = message;
+        }
+    }
+
+    public void ClearStatusMessage()
+    {
+        placementStatusHint = "";
+        if (statusText == null)
+            return;
+
+        statusText.text = "";
+        statusText.gameObject.SetActive(false);
     }
 
     private void UpdatePlacementStatusHint()

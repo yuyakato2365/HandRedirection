@@ -34,6 +34,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     public bool IsSpatialAnchorMode => CurrentMode == RedirectionMode.SpatialAnchor;
 
     private bool handRedirectionCurrentlyEnabled = true;
+    private TrackerToCubeOffsetCalibrator3[] trackerCalibrators = new TrackerToCubeOffsetCalibrator3[0];
 
     private void Awake()
     {
@@ -125,6 +126,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
                 handRedirectionBehaviours = new MonoBehaviour[] { goGo };
         }
 
+        trackerCalibrators = FindObjectsByType<TrackerToCubeOffsetCalibrator3>(FindObjectsSortMode.None);
         SubscribeDeskBinderEvents();
     }
 
@@ -235,7 +237,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     private void OnDeskAlignmentConfirmed()
     {
         if (placer != null)
-            placer.SetStatusMessage("Desk alignment confirmed\nSpatial Anchor hand redirection enabled");
+            placer.ClearStatusMessage();
 
         if (IsSpatialAnchorMode)
             SetMode(RedirectionMode.SpatialAnchor);
@@ -309,6 +311,8 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
     private void SetOriginalModeBehavioursForMode(bool spatialMode)
     {
+        ConfigureTrackerCalibratorsForMode(spatialMode);
+
         if (originalModeBehaviours == null)
             return;
 
@@ -320,13 +324,34 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
             if (behaviour is TrackerToCubeOffsetCalibrator3 trackerCalibrator)
             {
-                trackerCalibrator.updateDeskTransformFromPackets = !spatialMode;
-                SetBehaviourEnabled(trackerCalibrator, true);
+                ConfigureTrackerCalibratorForMode(trackerCalibrator, spatialMode);
                 continue;
             }
 
             SetBehaviourEnabled(behaviour, !spatialMode);
         }
+    }
+
+    private void ConfigureTrackerCalibratorsForMode(bool spatialMode)
+    {
+        if (trackerCalibrators == null || trackerCalibrators.Length == 0)
+            trackerCalibrators = FindObjectsByType<TrackerToCubeOffsetCalibrator3>(FindObjectsSortMode.None);
+
+        if (trackerCalibrators == null)
+            return;
+
+        for (int i = 0; i < trackerCalibrators.Length; i++)
+            ConfigureTrackerCalibratorForMode(trackerCalibrators[i], spatialMode);
+    }
+
+    private static void ConfigureTrackerCalibratorForMode(TrackerToCubeOffsetCalibrator3 trackerCalibrator, bool spatialMode)
+    {
+        if (trackerCalibrator == null)
+            return;
+
+        trackerCalibrator.updateDeskTransformFromPackets = !spatialMode;
+        trackerCalibrator.objectPoseSpace = TrackerToCubeOffsetCalibrator3.ObjectPoseSpace.DeskTracker;
+        SetBehaviourEnabled(trackerCalibrator, true);
     }
 
     private static void SetBehaviourEnabled(MonoBehaviour behaviour, bool enabled)
