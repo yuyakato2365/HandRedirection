@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using UnityEngine;
 
 public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
@@ -35,6 +36,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [Range(0f, 1f)] public float pinchReleaseThreshold = 0.35f;
     public bool autoFindAlignmentHands = true;
     public bool applyFullLeftHandRotation = true;
+    public bool useLeftWristRotation = true;
     public bool invertLeftHandYaw = false;
     public bool requireRightPinchReleaseBeforeConfirm = true;
 
@@ -62,6 +64,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private Quaternion leftPinchStartRotation = Quaternion.identity;
     private Quaternion handRotationAdjustment = Quaternion.identity;
     private Quaternion handRotationAdjustmentAtLeftPinchStart = Quaternion.identity;
+    private Transform leftWristTransform;
 
     private void Awake()
     {
@@ -69,6 +72,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             anchorPlacer = FindAnyObjectByType<ManualSpatialAnchorPlacer>();
         AutoAssignTargets();
         AutoAssignHands();
+        AutoAssignLeftWrist();
     }
 
     private void Start()
@@ -228,20 +232,21 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
 
         AutoAssignHands();
+        AutoAssignLeftWrist();
 
         bool leftPinching = IsLeftRotationPinching();
         if (leftPinching && !wasLeftRotationPinching)
         {
             leftPinchStartYawDegrees = GetHandYawDegrees(leftRotationHand);
             yawAdjustmentAtLeftPinchStart = yawAdjustmentDegrees;
-            leftPinchStartRotation = GetHandRotation(leftRotationHand);
+            leftPinchStartRotation = GetLeftRotationAlignmentRotation();
             handRotationAdjustmentAtLeftPinchStart = handRotationAdjustment;
         }
         else if (leftPinching)
         {
             if (applyFullLeftHandRotation)
             {
-                Quaternion deltaRotation = GetHandRotation(leftRotationHand) * Quaternion.Inverse(leftPinchStartRotation);
+                Quaternion deltaRotation = GetLeftRotationAlignmentRotation() * Quaternion.Inverse(leftPinchStartRotation);
                 handRotationAdjustment = deltaRotation * handRotationAdjustmentAtLeftPinchStart;
             }
             else
@@ -330,6 +335,18 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         return Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
     }
 
+    private Quaternion GetLeftRotationAlignmentRotation()
+    {
+        if (useLeftWristRotation)
+        {
+            AutoAssignLeftWrist();
+            if (leftWristTransform != null)
+                return leftWristTransform.rotation;
+        }
+
+        return GetHandRotation(leftRotationHand);
+    }
+
     private static Quaternion GetHandRotation(OVRHand hand)
     {
         return hand != null ? hand.transform.rotation : Quaternion.identity;
@@ -374,11 +391,78 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             if (hand == null)
                 continue;
 
-            string lowerName = hand.name.ToLowerInvariant();
-            if (leftRotationHand == null && lowerName.Contains("left"))
+            if (leftRotationHand == null && IsLikelyHandedness(hand, true))
                 leftRotationHand = hand;
-            else if (rightConfirmHand == null && lowerName.Contains("right"))
+            else if (rightConfirmHand == null && IsLikelyHandedness(hand, false))
                 rightConfirmHand = hand;
+        }
+    }
+
+    private static bool IsLikelyHandedness(OVRHand hand, bool left)
+    {
+        if (hand == null)
+            return false;
+
+        string target = left ? "left" : "right";
+        string lowerName = hand.name.ToLowerInvariant();
+        if (lowerName.Contains(target))
+            return true;
+
+        if (TryObjectContainsText(hand, target))
+            return true;
+
+        Component[] components = hand.GetComponents<Component>();
+        for (int i = 0; i < components.Length; i++)
+        {
+            if (TryObjectContainsText(components[i], target))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryObjectContainsText(object source, string target)
+    {
+        if (source == null)
+            return false;
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        Type type = source.GetType();
+        PropertyInfo handTypeProperty = type.GetProperty("HandType", flags);
+        if (handTypeProperty != null &&
+            handTypeProperty.GetIndexParameters().Length == 0 &&
+            ValueContainsText(handTypeProperty.GetValue(source, null), target))
+        {
+            return true;
+        }
+
+        FieldInfo handTypeField = type.GetField("HandType", flags) ??
+                                  type.GetField("_handType", flags) ??
+                                  type.GetField("_handedness", flags);
+        return ValueContainsText(handTypeField?.GetValue(source), target);
+    }
+
+    private static bool ValueContainsText(object value, string target)
+    {
+        return value != null && value.ToString().ToLowerInvariant().Contains(target);
+    }
+
+    private void AutoAssignLeftWrist()
+    {
+        if (!useLeftWristRotation || leftWristTransform != null || leftRotationHand == null)
+            return;
+
+        OVRSkeleton skeleton = leftRotationHand.GetComponent<OVRSkeleton>();
+        if (skeleton == null || skeleton.Bones == null)
+            return;
+
+        foreach (var bone in skeleton.Bones)
+        {
+            if (bone.Id == OVRSkeleton.BoneId.Hand_WristRoot && bone.Transform != null)
+            {
+                leftWristTransform = bone.Transform;
+                return;
+            }
         }
     }
 }
