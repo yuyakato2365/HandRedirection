@@ -75,6 +75,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private Transform leftWristTransform;
     private float nextActivePinchLogTime;
     private float nextLeftWristFailureLogTime;
+    private string lastLeftRotationSource = "none";
     private string handAlignmentLogPath;
 
     private void Awake()
@@ -268,7 +269,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             leftPinchStartRotation = GetLeftRotationAlignmentRotation();
             handRotationAdjustmentAtLeftPinchStart = handRotationAdjustment;
             LogAlignmentEvent(
-                $"Left pinch start wrist={FormatTransform(leftWristTransform)} " +
+                $"Left pinch start source={lastLeftRotationSource} wrist={FormatTransform(leftWristTransform)} " +
                 $"startRot={FormatRotation(leftPinchStartRotation)} carryAdjustment={FormatRotation(handRotationAdjustmentAtLeftPinchStart)}");
         }
         else if (leftPinching)
@@ -384,10 +385,43 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         {
             AutoAssignLeftWrist();
             if (leftWristTransform != null)
+            {
+                lastLeftRotationSource = $"wristTransform:{leftWristTransform.name}";
                 return leftWristTransform.rotation;
+            }
+
+            if (TryGetSkeletonRootRotation(leftRotationHand, out Quaternion skeletonRootRotation))
+            {
+                lastLeftRotationSource = $"skeletonRoot:{leftRotationHand.name}";
+                return skeletonRootRotation;
+            }
         }
 
+        lastLeftRotationSource = leftRotationHand != null ? $"handTransform:{leftRotationHand.name}" : "identity";
         return GetHandRotation(leftRotationHand);
+    }
+
+    private static bool TryGetSkeletonRootRotation(OVRHand hand, out Quaternion rotation)
+    {
+        rotation = Quaternion.identity;
+        if (hand == null || !hand.IsTracked)
+            return false;
+
+        OVRSkeleton.IOVRSkeletonDataProvider skeletonProvider = hand as OVRSkeleton.IOVRSkeletonDataProvider;
+        if (skeletonProvider == null)
+            return false;
+
+        OVRSkeleton.SkeletonPoseData poseData = skeletonProvider.GetSkeletonPoseData();
+        if (!poseData.IsDataValid || poseData.RootScale <= 0f)
+            return false;
+
+        rotation = FromFlippedZQuatf(poseData.RootPose.Orientation);
+        return true;
+    }
+
+    private static Quaternion FromFlippedZQuatf(OVRPlugin.Quatf value)
+    {
+        return new Quaternion(-value.x, -value.y, value.z, value.w);
     }
 
     private static Quaternion GetHandRotation(OVRHand hand)
@@ -574,8 +608,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
 
         nextActivePinchLogTime = Time.realtimeSinceStartup + activePinchLogIntervalSec;
+        Quaternion currentRotation = GetLeftRotationAlignmentRotation();
         LogAlignmentEvent(
-            $"Left pinch active current={FormatRotation(GetLeftRotationAlignmentRotation())} " +
+            $"Left pinch active source={lastLeftRotationSource} current={FormatRotation(currentRotation)} " +
             $"delta={FormatRotation(deltaRotation)} handAdjustment={FormatRotation(handRotationAdjustment)} " +
             $"desk={FormatTransform(deskOrigin)} trackerDesk={FormatTransform(trackerDeskTransform)}");
     }
