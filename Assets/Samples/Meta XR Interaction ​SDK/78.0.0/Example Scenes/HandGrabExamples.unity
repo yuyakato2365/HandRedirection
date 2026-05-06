@@ -3955,15 +3955,21 @@ MonoBehaviour:
   enableHandRotationAlignment: 1
   leftRotationHand: {fileID: 0}
   rightConfirmHand: {fileID: 0}
+  leftRotationPinchProvider: {fileID: 0}
+  rightConfirmPinchProvider: {fileID: 0}
   rotationFinger: 1
+  fineRotationFinger: 2
   confirmFinger: 1
   pinchStartThreshold: 0.7
   pinchReleaseThreshold: 0.35
+  fineRotationScale: 0.1
   autoFindAlignmentHands: 1
   applyFullLeftHandRotation: 1
+  useLeftWristRotation: 1
   invertLeftHandYaw: 0
   requireRightPinchReleaseBeforeConfirm: 1
   followEveryFrame: 1
+  followConfirmedAnchorEveryFrame: 0
   applyOnStart: 1
 --- !u!114 &278646989
 MonoBehaviour:
@@ -38999,7 +39005,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8693033184892289455, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 6.531768
+      value: 6.5
       objectReference: {fileID: 0}
     - target: {fileID: 8693033184892289455, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
       propertyPath: m_LocalPosition.z
