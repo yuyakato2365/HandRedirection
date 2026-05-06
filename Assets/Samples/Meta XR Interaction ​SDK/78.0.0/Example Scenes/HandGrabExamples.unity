@@ -3952,6 +3952,17 @@ MonoBehaviour:
   yawOnlyRotationAdjustment: 1
   yawAdjustStepDegrees: 1
   yawAdjustLargeStepDegrees: 5
+  enableHandRotationAlignment: 1
+  leftRotationHand: {fileID: 0}
+  rightConfirmHand: {fileID: 0}
+  rotationFinger: 1
+  confirmFinger: 1
+  pinchStartThreshold: 0.7
+  pinchReleaseThreshold: 0.35
+  autoFindAlignmentHands: 1
+  applyFullLeftHandRotation: 1
+  invertLeftHandYaw: 0
+  requireRightPinchReleaseBeforeConfirm: 1
   followEveryFrame: 1
   applyOnStart: 1
 --- !u!114 &278646989

@@ -25,6 +25,19 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public float yawAdjustStepDegrees = 1f;
     public float yawAdjustLargeStepDegrees = 5f;
 
+    [Header("Hand Rotation Alignment")]
+    public bool enableHandRotationAlignment = true;
+    public OVRHand leftRotationHand;
+    public OVRHand rightConfirmHand;
+    public OVRHand.HandFinger rotationFinger = OVRHand.HandFinger.Index;
+    public OVRHand.HandFinger confirmFinger = OVRHand.HandFinger.Index;
+    [Range(0f, 1f)] public float pinchStartThreshold = 0.7f;
+    [Range(0f, 1f)] public float pinchReleaseThreshold = 0.35f;
+    public bool autoFindAlignmentHands = true;
+    public bool applyFullLeftHandRotation = true;
+    public bool invertLeftHandYaw = false;
+    public bool requireRightPinchReleaseBeforeConfirm = true;
+
     [Header("Behaviour")]
     public bool followEveryFrame = true;
     public bool applyOnStart = true;
@@ -41,12 +54,21 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private Quaternion initialAlignmentRotation = Quaternion.identity;
     private float yawAdjustmentDegrees;
+    private bool wasLeftRotationPinching;
+    private bool wasRightConfirmPinching;
+    private bool waitingForRightConfirmRelease;
+    private float leftPinchStartYawDegrees;
+    private float yawAdjustmentAtLeftPinchStart;
+    private Quaternion leftPinchStartRotation = Quaternion.identity;
+    private Quaternion handRotationAdjustment = Quaternion.identity;
+    private Quaternion handRotationAdjustmentAtLeftPinchStart = Quaternion.identity;
 
     private void Awake()
     {
         if (anchorPlacer == null)
             anchorPlacer = FindAnyObjectByType<ManualSpatialAnchorPlacer>();
         AutoAssignTargets();
+        AutoAssignHands();
     }
 
     private void Start()
@@ -59,6 +81,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         if (followEveryFrame)
             ApplyNow();
+
+        UpdateHandRotationAlignment();
     }
 
     [ContextMenu("Anchor Binder/Apply Now")]
@@ -91,8 +115,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             : GetCurrentTargetRotation(anchor.rotation * Quaternion.Euler(localEulerOffset));
 
         yawAdjustmentDegrees = 0f;
+        handRotationAdjustment = Quaternion.identity;
         HasAlignmentState = true;
         IsAlignmentConfirmed = !requireManualRotationConfirmation;
+        wasLeftRotationPinching = IsLeftRotationPinching();
+        wasRightConfirmPinching = IsRightConfirmPinching();
+        waitingForRightConfirmRelease = requireRightPinchReleaseBeforeConfirm;
         ApplyNow();
 
         if (IsAlignmentConfirmed)
@@ -161,6 +189,10 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         HasAlignmentState = false;
         IsAlignmentConfirmed = false;
         yawAdjustmentDegrees = 0f;
+        handRotationAdjustment = Quaternion.identity;
+        wasLeftRotationPinching = false;
+        wasRightConfirmPinching = false;
+        waitingForRightConfirmRelease = false;
         AlignmentCleared?.Invoke();
     }
 
@@ -190,14 +222,67 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             BeginManualRotationAlignment();
     }
 
+    private void UpdateHandRotationAlignment()
+    {
+        if (!enableHandRotationAlignment || !IsAdjustingAlignment)
+            return;
+
+        AutoAssignHands();
+
+        bool leftPinching = IsLeftRotationPinching();
+        if (leftPinching && !wasLeftRotationPinching)
+        {
+            leftPinchStartYawDegrees = GetHandYawDegrees(leftRotationHand);
+            yawAdjustmentAtLeftPinchStart = yawAdjustmentDegrees;
+            leftPinchStartRotation = GetHandRotation(leftRotationHand);
+            handRotationAdjustmentAtLeftPinchStart = handRotationAdjustment;
+        }
+        else if (leftPinching)
+        {
+            if (applyFullLeftHandRotation)
+            {
+                Quaternion deltaRotation = GetHandRotation(leftRotationHand) * Quaternion.Inverse(leftPinchStartRotation);
+                handRotationAdjustment = deltaRotation * handRotationAdjustmentAtLeftPinchStart;
+            }
+            else
+            {
+                float currentYaw = GetHandYawDegrees(leftRotationHand);
+                float deltaYaw = Mathf.DeltaAngle(leftPinchStartYawDegrees, currentYaw);
+                if (invertLeftHandYaw)
+                    deltaYaw = -deltaYaw;
+
+                yawAdjustmentDegrees = yawAdjustmentAtLeftPinchStart + deltaYaw;
+            }
+
+            ApplyNow();
+            AlignmentChanged?.Invoke();
+        }
+
+        wasLeftRotationPinching = leftPinching;
+
+        bool rightPinching = IsRightConfirmPinching();
+        if (waitingForRightConfirmRelease)
+        {
+            if (!rightPinching)
+                waitingForRightConfirmRelease = false;
+        }
+        else if (rightPinching && !wasRightConfirmPinching)
+        {
+            ConfirmManualRotationAlignment();
+        }
+
+        wasRightConfirmPinching = rightPinching;
+    }
+
     private Quaternion ResolveTargetRotation(Transform anchor)
     {
         Quaternion baseRotation = HasAlignmentState
             ? initialAlignmentRotation
             : anchor.rotation * Quaternion.Euler(localEulerOffset);
 
-        Quaternion adjustment = Quaternion.Euler(0f, yawAdjustmentDegrees, 0f);
-        return yawOnlyRotationAdjustment ? adjustment * baseRotation : baseRotation * adjustment;
+        Quaternion yawAdjustment = Quaternion.Euler(0f, yawAdjustmentDegrees, 0f);
+        Quaternion adjustedRotation = yawOnlyRotationAdjustment ? yawAdjustment * baseRotation : baseRotation * yawAdjustment;
+        return applyFullLeftHandRotation ? handRotationAdjustment * adjustedRotation : adjustedRotation;
     }
 
     private Quaternion GetCurrentTargetRotation(Quaternion fallbackRotation)
@@ -208,6 +293,46 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return trackerDeskTransform.rotation;
 
         return fallbackRotation;
+    }
+
+    private bool IsLeftRotationPinching()
+    {
+        return IsHandPinching(leftRotationHand, rotationFinger);
+    }
+
+    private bool IsRightConfirmPinching()
+    {
+        return IsHandPinching(rightConfirmHand, confirmFinger);
+    }
+
+    private bool IsHandPinching(OVRHand hand, OVRHand.HandFinger finger)
+    {
+        if (hand == null || !hand.IsTracked)
+            return false;
+
+        float strength = hand.GetFingerPinchStrength(finger);
+        bool wasPinching = hand == leftRotationHand ? wasLeftRotationPinching : wasRightConfirmPinching;
+        float threshold = wasPinching ? pinchReleaseThreshold : pinchStartThreshold;
+        return hand.GetFingerIsPinching(finger) || strength >= threshold;
+    }
+
+    private static float GetHandYawDegrees(OVRHand hand)
+    {
+        if (hand == null)
+            return 0f;
+
+        Vector3 forward = Vector3.ProjectOnPlane(hand.transform.forward, Vector3.up);
+        if (forward.sqrMagnitude < 1e-6f)
+            forward = Vector3.ProjectOnPlane(hand.transform.up, Vector3.up);
+        if (forward.sqrMagnitude < 1e-6f)
+            return hand.transform.eulerAngles.y;
+
+        return Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
+    }
+
+    private static Quaternion GetHandRotation(OVRHand hand)
+    {
+        return hand != null ? hand.transform.rotation : Quaternion.identity;
     }
 
     private void AutoAssignTargets()
@@ -231,6 +356,29 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             TrackerToCubeOffsetCalibrator3 tracker = FindAnyObjectByType<TrackerToCubeOffsetCalibrator3>();
             if (tracker != null)
                 trackerDeskTransform = tracker.deskTransform;
+        }
+    }
+
+    private void AutoAssignHands()
+    {
+        if (!autoFindAlignmentHands || (leftRotationHand != null && rightConfirmHand != null))
+            return;
+
+        OVRHand[] hands = FindObjectsByType<OVRHand>(FindObjectsSortMode.None);
+        if (hands == null)
+            return;
+
+        for (int i = 0; i < hands.Length; i++)
+        {
+            OVRHand hand = hands[i];
+            if (hand == null)
+                continue;
+
+            string lowerName = hand.name.ToLowerInvariant();
+            if (leftRotationHand == null && lowerName.Contains("left"))
+                leftRotationHand = hand;
+            else if (rightConfirmHand == null && lowerName.Contains("right"))
+                rightConfirmHand = hand;
         }
     }
 }

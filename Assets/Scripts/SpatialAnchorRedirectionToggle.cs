@@ -202,7 +202,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
             deskBinder.BeginManualRotationAlignment();
 
         if (placer != null && deskBinder != null && deskBinder.requireManualRotationConfirmation)
-            placer.SetStatusMessage("Anchor position applied to deskOrigin\nAdjust desk angle on PC, then confirm");
+            placer.SetStatusMessage("Anchor position applied to deskOrigin\nLeft pinch rotates desk in 3D\nRight pinch confirms rotation");
 
         if (IsSpatialAnchorMode)
             SetMode(RedirectionMode.SpatialAnchor);
@@ -226,7 +226,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     private void OnDeskAlignmentChanged()
     {
         if (placer != null && deskBinder != null && deskBinder.IsAdjustingAlignment)
-            placer.SetStatusMessage($"Adjust desk angle on PC\nYaw offset: {deskBinder.CurrentYawAdjustmentDegrees:0.###} deg");
+            placer.SetStatusMessage($"Left pinch rotates desk in 3D\nRight pinch confirms\nYaw offset: {deskBinder.CurrentYawAdjustmentDegrees:0.###} deg");
 
         if (IsSpatialAnchorMode)
             SetMode(RedirectionMode.SpatialAnchor);
