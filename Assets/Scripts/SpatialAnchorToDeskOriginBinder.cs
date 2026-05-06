@@ -51,13 +51,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool followEveryFrame = true;
     [Tooltip("Keep applying anchor pose after desk alignment is confirmed. Usually false avoids head-motion drift from live anchor updates.")]
     public bool followConfirmedAnchorEveryFrame = false;
-    [Tooltip("When the headset is worn again, reapply the saved anchor pose to deskOrigin once.")]
-    public bool reapplyDeskOnHmdMounted = true;
-    public float hmdMountedReapplyDelaySec = 0.75f;
-    public float hmdMountedAnchorStableSeconds = 0.75f;
-    public float hmdMountedAnchorMaxWaitSeconds = 4.0f;
-    public float hmdMountedStablePositionThresholdMeters = 0.003f;
-    public float hmdMountedStableRotationThresholdDegrees = 0.25f;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -91,13 +84,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private float nextLeftWristFailureLogTime;
     private string lastLeftRotationSource = "none";
     private string handAlignmentLogPath;
-    private bool pendingHmdMountedReapply;
-    private float hmdMountedReapplyTime;
-    private bool waitingForHmdMountedAnchorStability;
-    private float hmdMountedStableStartTime;
-    private float hmdMountedWaitStartTime;
-    private Vector3 lastHmdMountedAnchorPosition;
-    private Quaternion lastHmdMountedAnchorRotation = Quaternion.identity;
 
     private void Awake()
     {
@@ -117,29 +103,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             ApplyNow();
     }
 
-    private void OnEnable()
-    {
-        OVRManager.HMDMounted += OnHmdMounted;
-    }
-
-    private void OnDisable()
-    {
-        OVRManager.HMDMounted -= OnHmdMounted;
-    }
-
     private void LateUpdate()
     {
-        if (pendingHmdMountedReapply && Time.realtimeSinceStartup >= hmdMountedReapplyTime)
-        {
-            pendingHmdMountedReapply = false;
-            BeginWaitForHmdMountedAnchorStability();
-        }
-
-        if (waitingForHmdMountedAnchorStability)
-        {
-            UpdateHmdMountedAnchorStabilityWait();
-        }
-
         if (ShouldApplyAnchorPoseThisFrame())
             ApplyNow();
 
@@ -351,19 +316,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AlignmentConfirmed?.Invoke();
     }
 
-    public void ReapplyDeskToCurrentAnchor(string reason)
-    {
-        if (!HasAlignmentState || !IsAlignmentConfirmed)
-            return;
-
-        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
-        if (anchor == null)
-            return;
-
-        ApplySavedOffsetAsConfirmed();
-        LogAlignmentEvent($"ReapplyDeskToCurrentAnchor reason={reason} desk={FormatTransform(deskOrigin)}");
-    }
-
     [Serializable]
     private struct SavedDeskAnchorOffset
     {
@@ -394,72 +346,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return true;
 
         return !IsAlignmentConfirmed || followConfirmedAnchorEveryFrame;
-    }
-
-    private void OnHmdMounted()
-    {
-        if (!reapplyDeskOnHmdMounted)
-            return;
-
-        pendingHmdMountedReapply = true;
-        waitingForHmdMountedAnchorStability = false;
-        hmdMountedReapplyTime = Time.realtimeSinceStartup + Mathf.Max(0f, hmdMountedReapplyDelaySec);
-        LogAlignmentEvent("HMD mounted; queued desk reapply after anchor stability wait");
-    }
-
-    private void BeginWaitForHmdMountedAnchorStability()
-    {
-        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
-        if (anchor == null)
-            return;
-
-        waitingForHmdMountedAnchorStability = true;
-        hmdMountedWaitStartTime = Time.realtimeSinceStartup;
-        hmdMountedStableStartTime = Time.realtimeSinceStartup;
-        lastHmdMountedAnchorPosition = anchor.position;
-        lastHmdMountedAnchorRotation = anchor.rotation;
-        LogAlignmentEvent("HMD mounted; waiting for current anchor pose to stabilize");
-    }
-
-    private void UpdateHmdMountedAnchorStabilityWait()
-    {
-        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
-        if (anchor == null)
-        {
-            waitingForHmdMountedAnchorStability = false;
-            return;
-        }
-
-        float now = Time.realtimeSinceStartup;
-        if (now - hmdMountedWaitStartTime >= hmdMountedAnchorMaxWaitSeconds)
-        {
-            waitingForHmdMountedAnchorStability = false;
-            ReapplyDeskToCurrentAnchor("HMD mounted max wait");
-            return;
-        }
-
-        float positionDelta = Vector3.Distance(anchor.position, lastHmdMountedAnchorPosition);
-        float rotationDelta = Quaternion.Angle(anchor.rotation, lastHmdMountedAnchorRotation);
-        bool stable = positionDelta <= hmdMountedStablePositionThresholdMeters &&
-                      rotationDelta <= hmdMountedStableRotationThresholdDegrees;
-
-        if (!stable)
-        {
-            hmdMountedStableStartTime = now;
-            lastHmdMountedAnchorPosition = anchor.position;
-            lastHmdMountedAnchorRotation = anchor.rotation;
-            return;
-        }
-
-        if (now - hmdMountedStableStartTime >= hmdMountedAnchorStableSeconds)
-        {
-            waitingForHmdMountedAnchorStability = false;
-            ReapplyDeskToCurrentAnchor("HMD mounted stable anchor");
-            return;
-        }
-
-        lastHmdMountedAnchorPosition = anchor.position;
-        lastHmdMountedAnchorRotation = anchor.rotation;
     }
 
     private void UpdateHandRotationAlignment()
