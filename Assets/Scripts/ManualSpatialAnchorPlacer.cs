@@ -168,6 +168,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     public void BeginPlacement()
     {
+        TryAutoAssignHand();
+        RefreshFallbackCamera();
         IsPlacementMode = true;
         wasPinching = false;
         UpdateCandidatePose();
@@ -326,6 +328,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     private void UpdateCandidatePose()
     {
+        RefreshFallbackCamera();
+
         if (!preferLiveHandPoseForPlacement && placementPointer == null && confirmHand != null)
             placementPointer = confirmHand.transform;
 
@@ -344,7 +348,13 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         Vector3 position;
         Vector3 forward;
 
-        if (sourceMode == PlacementSourceMode.RaycastFromPointer &&
+        if (sourceMode == PlacementSourceMode.OvrHandJoint)
+        {
+            position = pointer.position + pointer.forward * fallbackDistance;
+            forward = pointer.forward;
+            candidatePose = new Pose(position, MakeRotation(forward, Vector3.up));
+        }
+        else if (sourceMode == PlacementSourceMode.RaycastFromPointer &&
             Physics.Raycast(pointer.position, pointer.forward, out RaycastHit hit, raycastMaxDistance, raycastMask, QueryTriggerInteraction.Ignore))
         {
             position = hit.point;
@@ -369,6 +379,14 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         if (previewObject != null)
             previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+    }
+
+    private void RefreshFallbackCamera()
+    {
+        if (fallbackCamera == null)
+            fallbackCamera = Camera.main;
+        if (fallbackCamera == null)
+            fallbackCamera = FindAnyObjectByType<Camera>();
     }
 
     private bool TryGetLiveHandPlacementPose(out Pose pose)
