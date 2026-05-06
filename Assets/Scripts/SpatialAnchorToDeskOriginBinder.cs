@@ -34,9 +34,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public PinchProvider leftRotationPinchProvider;
     public PinchProvider rightConfirmPinchProvider;
     public OVRHand.HandFinger rotationFinger = OVRHand.HandFinger.Index;
+    public OVRHand.HandFinger fineRotationFinger = OVRHand.HandFinger.Middle;
     public OVRHand.HandFinger confirmFinger = OVRHand.HandFinger.Index;
     [Range(0f, 1f)] public float pinchStartThreshold = 0.7f;
     [Range(0f, 1f)] public float pinchReleaseThreshold = 0.35f;
+    [Range(0.01f, 1f)] public float fineRotationScale = 0.1f;
     public bool autoFindAlignmentHands = true;
     public bool applyFullLeftHandRotation = true;
     public bool useLeftWristRotation = true;
@@ -73,6 +75,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private Quaternion handRotationAdjustment = Quaternion.identity;
     private Quaternion handRotationAdjustmentAtLeftPinchStart = Quaternion.identity;
     private Transform leftWristTransform;
+    private bool wasLeftFineRotationPinching;
     private float nextActivePinchLogTime;
     private float nextLeftWristFailureLogTime;
     private string lastLeftRotationSource = "none";
@@ -140,6 +143,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         HasAlignmentState = true;
         IsAlignmentConfirmed = !requireManualRotationConfirmation;
         wasLeftRotationPinching = IsLeftRotationPinching();
+        wasLeftFineRotationPinching = IsLeftFineRotationPinching();
         wasRightConfirmPinching = IsRightConfirmPinching();
         waitingForRightConfirmRelease = requireRightPinchReleaseBeforeConfirm;
         ApplyNow();
@@ -217,6 +221,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
         wasLeftRotationPinching = false;
+        wasLeftFineRotationPinching = false;
         wasRightConfirmPinching = false;
         waitingForRightConfirmRelease = false;
         LogAlignmentEvent("ClearAlignmentState");
@@ -258,11 +263,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AutoAssignPinchProviders();
         AutoAssignLeftWrist();
 
-        bool leftPinching = IsLeftRotationPinching();
+        bool leftNormalPinching = IsLeftRotationPinching();
+        bool leftFinePinching = IsLeftFineRotationPinching();
+        bool leftPinching = leftNormalPinching || leftFinePinching;
+        bool fineModeChanged = leftFinePinching != wasLeftFineRotationPinching;
         if (leftPinching != wasLeftRotationPinching)
             LogAlignmentEvent($"Left pinch changed {wasLeftRotationPinching} -> {leftPinching} {BuildPinchDebugString()}");
+        if (fineModeChanged)
+            LogAlignmentEvent($"Left fine pinch changed {wasLeftFineRotationPinching} -> {leftFinePinching} scale={GetLeftRotationScale():0.###} {BuildPinchDebugString()}");
 
-        if (leftPinching && !wasLeftRotationPinching)
+        if (leftPinching && (!wasLeftRotationPinching || fineModeChanged))
         {
             leftPinchStartYawDegrees = GetHandYawDegrees(leftRotationHand);
             yawAdjustmentAtLeftPinchStart = yawAdjustmentDegrees;
@@ -270,6 +280,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             handRotationAdjustmentAtLeftPinchStart = handRotationAdjustment;
             LogAlignmentEvent(
                 $"Left pinch start source={lastLeftRotationSource} wrist={FormatTransform(leftWristTransform)} " +
+                $"scale={GetLeftRotationScale():0.###} " +
                 $"startRot={FormatRotation(leftPinchStartRotation)} carryAdjustment={FormatRotation(handRotationAdjustmentAtLeftPinchStart)}");
         }
         else if (leftPinching)
@@ -277,8 +288,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             if (applyFullLeftHandRotation)
             {
                 Quaternion deltaRotation = GetLeftRotationAlignmentRotation() * Quaternion.Inverse(leftPinchStartRotation);
-                handRotationAdjustment = deltaRotation * handRotationAdjustmentAtLeftPinchStart;
-                LogActivePinchFrame(deltaRotation);
+                Quaternion scaledDeltaRotation = ScaleRotation(deltaRotation, GetLeftRotationScale());
+                handRotationAdjustment = scaledDeltaRotation * handRotationAdjustmentAtLeftPinchStart;
+                LogActivePinchFrame(deltaRotation, scaledDeltaRotation);
             }
             else
             {
@@ -287,7 +299,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
                 if (invertLeftHandYaw)
                     deltaYaw = -deltaYaw;
 
-                yawAdjustmentDegrees = yawAdjustmentAtLeftPinchStart + deltaYaw;
+                yawAdjustmentDegrees = yawAdjustmentAtLeftPinchStart + deltaYaw * GetLeftRotationScale();
             }
 
             ApplyNow();
@@ -295,6 +307,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         }
 
         wasLeftRotationPinching = leftPinching;
+        wasLeftFineRotationPinching = leftFinePinching;
 
         bool rightPinching = IsRightConfirmPinching();
         if (rightPinching != wasRightConfirmPinching)
@@ -344,6 +357,22 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return leftRotationPinchProvider.IsPinching;
 
         return IsHandPinching(leftRotationHand, rotationFinger);
+    }
+
+    private bool IsLeftFineRotationPinching()
+    {
+        return IsHandPinching(leftRotationHand, fineRotationFinger);
+    }
+
+    private float GetLeftRotationScale()
+    {
+        return IsLeftFineRotationPinching() ? fineRotationScale : 1f;
+    }
+
+    private static Quaternion ScaleRotation(Quaternion rotation, float scale)
+    {
+        scale = Mathf.Clamp01(scale);
+        return Quaternion.SlerpUnclamped(Quaternion.identity, rotation, scale);
     }
 
     private bool IsRightConfirmPinching()
@@ -602,7 +631,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         LogAlignmentEvent(message);
     }
 
-    private void LogActivePinchFrame(Quaternion deltaRotation)
+    private void LogActivePinchFrame(Quaternion deltaRotation, Quaternion scaledDeltaRotation)
     {
         if (!logHandAlignmentDebug || Time.realtimeSinceStartup < nextActivePinchLogTime)
             return;
@@ -611,7 +640,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         Quaternion currentRotation = GetLeftRotationAlignmentRotation();
         LogAlignmentEvent(
             $"Left pinch active source={lastLeftRotationSource} current={FormatRotation(currentRotation)} " +
-            $"delta={FormatRotation(deltaRotation)} handAdjustment={FormatRotation(handRotationAdjustment)} " +
+            $"scale={GetLeftRotationScale():0.###} delta={FormatRotation(deltaRotation)} scaledDelta={FormatRotation(scaledDeltaRotation)} " +
+            $"handAdjustment={FormatRotation(handRotationAdjustment)} " +
             $"desk={FormatTransform(deskOrigin)} trackerDesk={FormatTransform(trackerDeskTransform)}");
     }
 
@@ -655,6 +685,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private string BuildPinchDebugString()
     {
         return $"leftProviderPinch={GetProviderPinchDebug(leftRotationPinchProvider)} rightProviderPinch={GetProviderPinchDebug(rightConfirmPinchProvider)} " +
+               $"leftFinePinch={GetHandFingerPinchDebug(leftRotationHand, fineRotationFinger)} " +
                $"leftHandTracked={GetHandTrackedDebug(leftRotationHand)} rightHandTracked={GetHandTrackedDebug(rightConfirmHand)}";
     }
 
@@ -666,6 +697,14 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private static string GetHandTrackedDebug(OVRHand hand)
     {
         return hand != null ? $"{hand.name}:{hand.IsTracked}" : "null";
+    }
+
+    private static string GetHandFingerPinchDebug(OVRHand hand, OVRHand.HandFinger finger)
+    {
+        if (hand == null)
+            return "null";
+
+        return $"{hand.name}/{finger}:{hand.GetFingerIsPinching(finger)}/{hand.GetFingerPinchStrength(finger):0.###}";
     }
 
     private static string GetObjectName(UnityEngine.Object obj)
