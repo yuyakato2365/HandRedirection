@@ -8,11 +8,18 @@ using UnityEngine;
 /// <summary>
 /// Receives tracker poses over UDP.
 /// - DSK0: desk tracker pose in head space (head <- desk)
-/// - REL0: object tracker pose in desk space (desk <- object)
-/// The script first updates the moving desk origin, then places all objects from that desk frame.
+/// - REL0: object tracker pose, usually in head-tracker space (head <- object)
+/// In Spatial Anchor mode, DSK0 is used only as the desk-tracker reference for REL0;
+/// the Unity DeskOrigin itself can remain driven by the spatial anchor.
 /// </summary>
 public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 {
+    public enum ObjectPoseSpace
+    {
+        HeadTracker,
+        DeskTracker
+    }
+
     [Serializable]
     public class TargetEntry
     {
@@ -57,6 +64,9 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     [Tooltip("Unity transform that represents the moving desk origin. GoGo's deskOrigin should reference this same transform.")]
     public Transform deskTransform;
 
+    [Tooltip("When false, DSK0 is not allowed to move deskTransform. REL0 objects can still be converted through the latest DSK0 pose and placed under deskTransform.")]
+    public bool updateDeskTransformFromPackets = true;
+
     [Header("Head -> HMD Offset")]
     [Tooltip("Translation from head tracker origin to Unity HMD origin, expressed in head coordinates.")]
     public Vector3 headToHmdPos = Vector3.zero;
@@ -79,7 +89,13 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     public Vector3 deskEulerOffset = Vector3.zero;
 
     [Header("Targets")]
-    [Tooltip("Objects driven by REL0 packets, interpreted in desk coordinates.")]
+    [Tooltip("Coordinate space of REL0 packets. Use HeadTracker when REL0 is still measured relative to the head tracker; it will be converted through DSK0 into DeskOrigin space.")]
+    public ObjectPoseSpace objectPoseSpace = ObjectPoseSpace.HeadTracker;
+
+    [Tooltip("If REL0 is in HeadTracker space, skip object updates until a DSK0 desk-tracker packet has arrived.")]
+    public bool requireDeskPoseForHeadTrackerObjects = true;
+
+    [Tooltip("Objects driven by REL0 packets.")]
     public List<TargetEntry> targets = new List<TargetEntry>();
 
     [Header("Object Smoothing")]
@@ -158,10 +174,12 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
     private void Update()
     {
-        if (hmdTransform == null || deskTransform == null)
+        if (deskTransform == null)
             return;
 
-        UpdateDeskTransform();
+        if (updateDeskTransformFromPackets && hmdTransform != null)
+            UpdateDeskTransform();
+
         UpdateTargetObjects();
     }
 
@@ -204,7 +222,20 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
         Vector3 deskPosW = deskTransform.position;
         Quaternion deskRotW = deskTransform.rotation;
-        Quaternion deskOffsetRotInv = Quaternion.Inverse(Quaternion.Euler(deskEulerOffset));
+        DeskPose deskPose;
+        bool hasDeskPose;
+        lock (latestLock)
+        {
+            hasDeskPose = hasLatestDeskPose;
+            deskPose = latestDeskPose;
+        }
+
+        if (objectPoseSpace == ObjectPoseSpace.HeadTracker &&
+            requireDeskPoseForHeadTrackerObjects &&
+            !hasDeskPose)
+        {
+            return;
+        }
 
         for (int i = 0; i < targets.Count; i++)
         {
@@ -222,8 +253,8 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             if (!found)
                 continue;
 
-            Vector3 relPosInDeskOrigin = deskOffsetRotInv * (rel.pos - deskPositionOffset);
-            Quaternion relRotInDeskOrigin = deskOffsetRotInv * rel.rot;
+            if (!TryResolveObjectPoseInDeskOrigin(rel, hasDeskPose, deskPose, out Vector3 relPosInDeskOrigin, out Quaternion relRotInDeskOrigin))
+                continue;
 
             Quaternion centerRotOffset = Quaternion.Euler(target.centerEulerOffset);
             Vector3 centerInDeskPos = relPosInDeskOrigin + (relRotInDeskOrigin * target.centerOffsetInTracker);
@@ -234,6 +265,39 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
             ApplyPose(target.objTransform, targetPosW, targetRotW, positionLerp, rotationSlerp);
         }
+    }
+
+    private bool TryResolveObjectPoseInDeskOrigin(
+        RelativePose rel,
+        bool hasDeskPose,
+        DeskPose deskPose,
+        out Vector3 positionInDeskOrigin,
+        out Quaternion rotationInDeskOrigin)
+    {
+        Quaternion deskOffsetRot = Quaternion.Euler(deskEulerOffset);
+
+        if (objectPoseSpace == ObjectPoseSpace.DeskTracker)
+        {
+            Quaternion deskOffsetRotInv = Quaternion.Inverse(deskOffsetRot);
+            positionInDeskOrigin = deskOffsetRotInv * (rel.pos - deskPositionOffset);
+            rotationInDeskOrigin = deskOffsetRotInv * rel.rot;
+            return true;
+        }
+
+        if (!hasDeskPose)
+        {
+            positionInDeskOrigin = default;
+            rotationInDeskOrigin = default;
+            return false;
+        }
+
+        Quaternion deskOriginRotInHead = deskPose.rot * deskOffsetRot;
+        Vector3 deskOriginPosInHead = deskPose.pos + (deskOriginRotInHead * deskPositionOffset);
+        Quaternion invDeskOriginRotInHead = Quaternion.Inverse(deskOriginRotInHead);
+
+        positionInDeskOrigin = invDeskOriginRotInHead * (rel.pos - deskOriginPosInHead);
+        rotationInDeskOrigin = invDeskOriginRotInHead * rel.rot;
+        return true;
     }
 
     private static void ApplyPose(Transform target, Vector3 targetPosW, Quaternion targetRotW, float posLerp, float rotSlerp)
@@ -263,7 +327,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     {
         if (hmdTransform == null)
         {
-            Debug.LogWarning("[TrackerToCubeOffsetCalibrator3] hmdTransform is null.");
+            Debug.LogWarning("[TrackerToCubeOffsetCalibrator3] hmdTransform is null. DeskOrigin packet updates will be skipped, but object updates can still run in Spatial Anchor mode.");
         }
 
         if (deskTransform == null)

@@ -75,7 +75,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         SetBehaviourEnabled(placer, spatialMode);
         SetBehaviourEnabled(deskBinder, enableDeskBinder);
         SetBehaviourListEnabled(spatialAnchorModeBehaviours, enableSpatialAnchorDrivenRedirection);
-        SetBehaviourListEnabled(originalModeBehaviours, !spatialMode);
+        SetOriginalModeBehavioursForMode(spatialMode);
         SetBehaviourListEnabled(handRedirectionBehaviours, enableHandRedirection);
         handRedirectionCurrentlyEnabled = enableHandRedirection;
 
@@ -305,6 +305,28 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
         for (int i = 0; i < behaviours.Length; i++)
             SetBehaviourEnabled(behaviours[i], enabled);
+    }
+
+    private void SetOriginalModeBehavioursForMode(bool spatialMode)
+    {
+        if (originalModeBehaviours == null)
+            return;
+
+        for (int i = 0; i < originalModeBehaviours.Length; i++)
+        {
+            MonoBehaviour behaviour = originalModeBehaviours[i];
+            if (behaviour == null)
+                continue;
+
+            if (behaviour is TrackerToCubeOffsetCalibrator3 trackerCalibrator)
+            {
+                trackerCalibrator.updateDeskTransformFromPackets = !spatialMode;
+                SetBehaviourEnabled(trackerCalibrator, true);
+                continue;
+            }
+
+            SetBehaviourEnabled(behaviour, !spatialMode);
+        }
     }
 
     private static void SetBehaviourEnabled(MonoBehaviour behaviour, bool enabled)
