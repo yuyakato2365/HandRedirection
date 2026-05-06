@@ -49,6 +49,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     [Header("Behaviour")]
     public bool followEveryFrame = true;
+    [Tooltip("Keep applying anchor pose after desk alignment is confirmed. Usually false avoids head-motion drift from live anchor updates.")]
+    public bool followConfirmedAnchorEveryFrame = false;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -103,7 +105,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (followEveryFrame)
+        if (ShouldApplyAnchorPoseThisFrame())
             ApplyNow();
 
         UpdateHandRotationAlignment();
@@ -333,6 +335,17 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         if (!HasAlignmentState)
             BeginManualRotationAlignment();
+    }
+
+    private bool ShouldApplyAnchorPoseThisFrame()
+    {
+        if (!followEveryFrame)
+            return false;
+
+        if (!HasAlignmentState)
+            return true;
+
+        return !IsAlignmentConfirmed || followConfirmedAnchorEveryFrame;
     }
 
     private void UpdateHandRotationAlignment()
