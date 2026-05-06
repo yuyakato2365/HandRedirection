@@ -3916,7 +3916,7 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier:
   hmdTransform: {fileID: 279069016}
-  rigRoot: {fileID: 0}
+  rigRoot: {fileID: 279069017}
   deskOrigin: {fileID: 1332633470}
   worldOffsetFromDeskOrigin: {x: 0, y: 1.2, z: 0}
   alignX: 1
@@ -3924,6 +3924,7 @@ MonoBehaviour:
   alignZ: 1
   applyStartupRigOffsetOnStart: 1
   startupRigWorldOffset: {x: 0, y: -6.5, z: 0}
+  startupRigOffsetDelayFrames: 8
   alignOnStart: 0
   waitFramesBeforeAlign: 8
   maxAdditionalWaitFramesForTrackedPose: 120
@@ -4040,6 +4041,11 @@ Transform:
 --- !u!4 &279069016 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 3181877142221811469, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
+  m_PrefabInstance: {fileID: 2115107099}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &279069017 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 3181877142221811467, guid: 5c4185868ee516f4fa09effcc1a54423, type: 3}
   m_PrefabInstance: {fileID: 2115107099}
   m_PrefabAsset: {fileID: 0}
 --- !u!1001 &281651379

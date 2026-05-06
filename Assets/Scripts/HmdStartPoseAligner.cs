@@ -17,6 +17,7 @@ public class HmdStartPoseAligner : MonoBehaviour
     [Header("Startup Rig Offset")]
     public bool applyStartupRigOffsetOnStart = true;
     public Vector3 startupRigWorldOffset = new Vector3(0f, -6.5f, 0f);
+    public int startupRigOffsetDelayFrames = 8;
 
     [Header("Timing")]
     public bool alignOnStart = true;
@@ -33,7 +34,7 @@ public class HmdStartPoseAligner : MonoBehaviour
     private void Start()
     {
         if (applyStartupRigOffsetOnStart)
-            ApplyStartupRigOffset();
+            StartCoroutine(ApplyStartupRigOffsetAfterDelay());
 
         if (alignOnStart)
             StartCoroutine(AlignAfterTrackingStarts());
@@ -51,6 +52,14 @@ public class HmdStartPoseAligner : MonoBehaviour
 
         if (logAlignment)
             Debug.Log($"[HmdStartPoseAligner] Applied startup rig offset {startupRigWorldOffset} to {rigRoot.name}.");
+    }
+
+    private IEnumerator ApplyStartupRigOffsetAfterDelay()
+    {
+        for (int i = 0; i < startupRigOffsetDelayFrames; i++)
+            yield return null;
+
+        ApplyStartupRigOffset();
     }
 
     [ContextMenu("HMD Start Pose/Align Now")]
