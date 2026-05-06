@@ -3871,6 +3871,7 @@ GameObject:
   - component: {fileID: 278646989}
   - component: {fileID: 278646988}
   - component: {fileID: 278646987}
+  - component: {fileID: 278646992}
   m_Layer: 0
   m_Name: SpatialAnchorCalibrationRoot
   m_TagString: Untagged
@@ -3902,6 +3903,30 @@ MonoBehaviour:
   clearAnchorWhenReturningToOriginal: 0
   disableHandRedirectionUntilAnchorExists: 1
   returnToOriginalWhenPlacementCanceledWithoutAnchor: 1
+--- !u!114 &278646992
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 278646986}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9a6c7b5e2f2b4b5489c0e2bb7d31c5e0, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  hmdTransform: {fileID: 279069016}
+  rigRoot: {fileID: 0}
+  deskOrigin: {fileID: 1332633470}
+  worldOffsetFromDeskOrigin: {x: 0, y: 1.2, z: 0}
+  alignX: 1
+  alignY: 1
+  alignZ: 1
+  alignOnStart: 1
+  waitFramesBeforeAlign: 8
+  maxAdditionalWaitFramesForTrackedPose: 120
+  minTrackedPoseMagnitude: 0.05
+  logAlignment: 1
 --- !u!114 &278646988
 MonoBehaviour:
   m_ObjectHideFlags: 0
