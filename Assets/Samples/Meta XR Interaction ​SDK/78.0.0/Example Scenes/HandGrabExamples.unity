@@ -4005,6 +4005,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   anchorManager: {fileID: 1772435046}
+  useOvrSpatialAnchorPersistence: 1
+  loadSavedAnchorOnStart: 0
+  savedAnchorPlayerPrefsKey: HandRedirection.DeskSpatialAnchorUuid
+  savedAnchorLocalizationTimeoutSec: 10
+  savedAnchorStabilizeSeconds: 0.75
+  savedAnchorMaxStabilizeWaitSeconds: 3
+  savedAnchorStablePositionThresholdMeters: 0.003
+  savedAnchorStableRotationThresholdDegrees: 0.25
+  reloadSavedAnchorOnHmdMounted: 1
+  hmdMountedAnchorReloadDelaySec: 1
   allowPcvrSessionAnchorFallback: 1
   anchorCreateTimeoutSec: 4
   sourceMode: 1
