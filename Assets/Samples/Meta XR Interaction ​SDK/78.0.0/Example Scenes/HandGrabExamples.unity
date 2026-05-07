@@ -3971,10 +3971,13 @@ MonoBehaviour:
   followEveryFrame: 1
   followConfirmedAnchorEveryFrame: 0
   reapplySavedOffsetOnAnchorRefresh: 1
+  useLatchedAnchorPoseAfterConfirmation: 1
   correctConfirmedDeskDrift: 1
   confirmedDeskDriftCheckIntervalSec: 0.5
   confirmedDeskPositionDriftThresholdMeters: 0.02
   confirmedDeskRotationDriftThresholdDegrees: 1
+  confirmedAnchorRelatchPositionThresholdMeters: 0.05
+  confirmedAnchorRelatchRotationThresholdDegrees: 3
   applyOnStart: 1
   logAnchorDeskDiagnostics: 1
 --- !u!114 &278646989

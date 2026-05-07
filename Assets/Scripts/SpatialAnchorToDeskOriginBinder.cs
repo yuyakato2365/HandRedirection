@@ -53,11 +53,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool followConfirmedAnchorEveryFrame = false;
     [Tooltip("When the saved persistent anchor is refreshed after HMD remount, reapply the saved Anchor -> DeskOrigin offset once.")]
     public bool reapplySavedOffsetOnAnchorRefresh = true;
+    [Tooltip("After desk alignment is confirmed, keep using the anchor pose captured at confirmation/load time instead of following live Spatial Anchor jitter.")]
+    public bool useLatchedAnchorPoseAfterConfirmation = true;
     [Tooltip("After alignment is confirmed, periodically verify DeskOrigin still matches the saved Anchor -> DeskOrigin offset. This catches HMD remounts when OVR HMDMounted is not delivered.")]
     public bool correctConfirmedDeskDrift = true;
     public float confirmedDeskDriftCheckIntervalSec = 0.5f;
     public float confirmedDeskPositionDriftThresholdMeters = 0.02f;
     public float confirmedDeskRotationDriftThresholdDegrees = 1f;
+    public float confirmedAnchorRelatchPositionThresholdMeters = 0.05f;
+    public float confirmedAnchorRelatchRotationThresholdDegrees = 3f;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -94,6 +98,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private string handAlignmentLogPath;
     private bool subscribedToAnchorRefresh;
     private float nextConfirmedDeskDriftCheckTime;
+    private bool hasLatchedConfirmedAnchorPose;
+    private Vector3 latchedAnchorPosition;
+    private Quaternion latchedAnchorRotation = Quaternion.identity;
 
     private void Awake()
     {
@@ -156,6 +163,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         Vector3 targetPos = anchor.TransformPoint(localPositionOffset);
         Quaternion targetRot = ResolveTargetRotation(anchor);
+        if (TryGetLatchedAnchorPose(out Vector3 anchorPosition, out Quaternion anchorRotation))
+        {
+            targetPos = anchorPosition + (anchorRotation * localPositionOffset);
+            targetRot = ResolveTargetRotation(anchorRotation);
+        }
 
         ApplyPose(deskOrigin, targetPos, targetRot);
         ApplyPose(trackerDeskTransform, targetPos, targetRot);
@@ -176,6 +188,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
+        hasLatchedConfirmedAnchorPose = false;
         HasAlignmentState = true;
         IsAlignmentConfirmed = !requireManualRotationConfirmation;
         wasLeftRotationPinching = IsLeftRotationPinching();
@@ -248,6 +261,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         ApplyNow();
         CaptureCurrentDeskAsOffset();
         SaveCurrentOffsetToPrefs();
+        CaptureLatchedAnchorPose(anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null, "ConfirmManualRotationAlignment");
         LogAnchorDeskDiagnostic("ConfirmManualRotationAlignment saved", anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null);
         initialAlignmentRotation = GetCurrentTargetRotation(Quaternion.identity);
         yawAdjustmentDegrees = 0f;
@@ -262,6 +276,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         IsAlignmentConfirmed = false;
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
+        hasLatchedConfirmedAnchorPose = false;
         wasLeftRotationPinching = false;
         wasLeftFineRotationPinching = false;
         wasRightConfirmPinching = false;
@@ -333,17 +348,28 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     public void ApplySavedOffsetAsConfirmed()
     {
+        ApplySavedOffsetAsConfirmed(true);
+    }
+
+    private void ApplySavedOffsetAsConfirmed(bool refreshLatchedAnchorPose)
+    {
         AutoAssignTargets();
 
         Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
         if (anchor == null)
             return;
 
-        initialAlignmentRotation = anchor.rotation * Quaternion.Euler(localEulerOffset);
+        Quaternion anchorRotationForDesk = anchor.rotation;
+        if (!refreshLatchedAnchorPose && TryGetLatchedAnchorPose(out _, out Quaternion latchedRotationForDesk))
+            anchorRotationForDesk = latchedRotationForDesk;
+
+        initialAlignmentRotation = anchorRotationForDesk * Quaternion.Euler(localEulerOffset);
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
         HasAlignmentState = true;
         IsAlignmentConfirmed = true;
+        if (refreshLatchedAnchorPose)
+            CaptureLatchedAnchorPose(anchor, "ApplySavedOffsetAsConfirmed");
         LogAlignmentEvent($"ApplySavedOffsetAsConfirmed begin anchor={FormatTransform(anchor)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
         LogAnchorDeskDiagnostic("ApplySavedOffsetAsConfirmed before", anchor);
         ApplyNow();
@@ -439,8 +465,19 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (anchor == null || target == null)
             return;
 
-        Vector3 expectedPosition = anchor.TransformPoint(localPositionOffset);
-        Quaternion expectedRotation = anchor.rotation * Quaternion.Euler(localEulerOffset);
+        if (TryRelatchConfirmedAnchorAfterLargeMove(anchor))
+            return;
+
+        Vector3 anchorPosition = anchor.position;
+        Quaternion anchorRotation = anchor.rotation;
+        if (TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
+        {
+            anchorPosition = latchedPosition;
+            anchorRotation = latchedRotation;
+        }
+
+        Vector3 expectedPosition = anchorPosition + (anchorRotation * localPositionOffset);
+        Quaternion expectedRotation = anchorRotation * Quaternion.Euler(localEulerOffset);
         float positionDelta = Vector3.Distance(target.position, expectedPosition);
         float rotationDelta = Quaternion.Angle(target.rotation, expectedRotation);
 
@@ -450,13 +487,36 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
         }
 
+        string anchorBasis = TryGetLatchedAnchorPose(out _, out _) ? "latched" : "live";
         LogAlignmentEvent(
             $"ConfirmedDeskDrift detected posDelta={positionDelta:0.###}m rotDelta={rotationDelta:0.###}deg " +
-            $"anchor={FormatTransform(anchor)} deskBefore={FormatTransform(deskOrigin)} " +
+            $"anchorBasis={anchorBasis} anchor={FormatTransform(anchor)} latchedAnchor={FormatLatchedAnchorPose()} deskBefore={FormatTransform(deskOrigin)} " +
             $"savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
         LogAnchorDeskDiagnostic("ConfirmedDeskDrift before", anchor);
-        ApplySavedOffsetAsConfirmed();
+        ApplySavedOffsetAsConfirmed(false);
         LogAnchorDeskDiagnostic("ConfirmedDeskDrift after", anchor);
+    }
+
+    private bool TryRelatchConfirmedAnchorAfterLargeMove(Transform anchor)
+    {
+        if (anchor == null || !TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
+            return false;
+
+        float anchorPositionDelta = Vector3.Distance(anchor.position, latchedPosition);
+        float anchorRotationDelta = Quaternion.Angle(anchor.rotation, latchedRotation);
+        if (anchorPositionDelta < confirmedAnchorRelatchPositionThresholdMeters &&
+            anchorRotationDelta < confirmedAnchorRelatchRotationThresholdDegrees)
+        {
+            return false;
+        }
+
+        LogAlignmentEvent(
+            $"ConfirmedAnchorRelatch detected posDelta={anchorPositionDelta:0.###}m rotDelta={anchorRotationDelta:0.###}deg " +
+            $"old={FormatLatchedAnchorPose()} new={FormatTransform(anchor)}");
+        CaptureLatchedAnchorPose(anchor, "ConfirmedAnchorRelatch");
+        ApplySavedOffsetAsConfirmed(false);
+        LogAnchorDeskDiagnostic("ConfirmedAnchorRelatch after", anchor);
+        return true;
     }
 
     private void UpdateHandRotationAlignment()
@@ -544,6 +604,35 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         Quaternion yawAdjustment = Quaternion.Euler(0f, yawAdjustmentDegrees, 0f);
         Quaternion adjustedRotation = yawOnlyRotationAdjustment ? yawAdjustment * baseRotation : baseRotation * yawAdjustment;
         return applyFullLeftHandRotation ? handRotationAdjustment * adjustedRotation : adjustedRotation;
+    }
+
+    private Quaternion ResolveTargetRotation(Quaternion anchorRotation)
+    {
+        Quaternion baseRotation = HasAlignmentState
+            ? initialAlignmentRotation
+            : anchorRotation * Quaternion.Euler(localEulerOffset);
+
+        Quaternion yawAdjustment = Quaternion.Euler(0f, yawAdjustmentDegrees, 0f);
+        Quaternion adjustedRotation = yawOnlyRotationAdjustment ? yawAdjustment * baseRotation : baseRotation * yawAdjustment;
+        return applyFullLeftHandRotation ? handRotationAdjustment * adjustedRotation : adjustedRotation;
+    }
+
+    private void CaptureLatchedAnchorPose(Transform anchor, string reason)
+    {
+        if (!useLatchedAnchorPoseAfterConfirmation || anchor == null)
+            return;
+
+        latchedAnchorPosition = anchor.position;
+        latchedAnchorRotation = anchor.rotation;
+        hasLatchedConfirmedAnchorPose = true;
+        LogAlignmentEvent($"LatchedAnchorPose reason={reason} {FormatLatchedAnchorPose()} liveAnchor={FormatTransform(anchor)}");
+    }
+
+    private bool TryGetLatchedAnchorPose(out Vector3 position, out Quaternion rotation)
+    {
+        position = latchedAnchorPosition;
+        rotation = latchedAnchorRotation;
+        return useLatchedAnchorPoseAfterConfirmation && IsAlignmentConfirmed && hasLatchedConfirmedAnchorPose;
     }
 
     private Quaternion GetCurrentTargetRotation(Quaternion fallbackRotation)
@@ -892,6 +981,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             targetPos = anchor.TransformPoint(localPositionOffset);
             targetRot = ResolveTargetRotation(anchor);
         }
+        string anchorBasis = "live";
+        if (TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
+        {
+            targetPos = latchedPosition + (latchedRotation * localPositionOffset);
+            targetRot = ResolveTargetRotation(latchedRotation);
+            anchorBasis = "latched";
+        }
 
         string actualOffset = "actualOffset=null";
         if (anchor != null && deskOrigin != null)
@@ -903,7 +999,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         LogAlignmentEvent(
             $"{label} anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)} " +
-            $"targetPos=({targetPos.x:0.###},{targetPos.y:0.###},{targetPos.z:0.###}) targetRot={FormatRotation(targetRot)} " +
+            $"anchorBasis={anchorBasis} {FormatLatchedAnchorPose()} targetPos=({targetPos.x:0.###},{targetPos.y:0.###},{targetPos.z:0.###}) targetRot={FormatRotation(targetRot)} " +
             $"savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset} {actualOffset} " +
             $"deskChildren={BuildChildSummary(deskOrigin)}");
     }
@@ -975,6 +1071,14 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         Vector3 position = transform.position;
         return $"{transform.name} pos({position.x:0.###},{position.y:0.###},{position.z:0.###}) rot={FormatRotation(transform.rotation)}";
+    }
+
+    private string FormatLatchedAnchorPose()
+    {
+        if (!hasLatchedConfirmedAnchorPose)
+            return "latchedAnchor=null";
+
+        return $"latchedAnchor=pos({latchedAnchorPosition.x:0.###},{latchedAnchorPosition.y:0.###},{latchedAnchorPosition.z:0.###}) rot={FormatRotation(latchedAnchorRotation)}";
     }
 
     private static string GetTransformPath(Transform transform)
