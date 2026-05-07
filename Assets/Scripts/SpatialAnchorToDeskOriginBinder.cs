@@ -53,6 +53,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool followConfirmedAnchorEveryFrame = false;
     [Tooltip("When the saved persistent anchor is refreshed after HMD remount, reapply the saved Anchor -> DeskOrigin offset once.")]
     public bool reapplySavedOffsetOnAnchorRefresh = true;
+    [Tooltip("After alignment is confirmed, periodically verify DeskOrigin still matches the saved Anchor -> DeskOrigin offset. This catches HMD remounts when OVR HMDMounted is not delivered.")]
+    public bool correctConfirmedDeskDrift = true;
+    public float confirmedDeskDriftCheckIntervalSec = 0.5f;
+    public float confirmedDeskPositionDriftThresholdMeters = 0.02f;
+    public float confirmedDeskRotationDriftThresholdDegrees = 1f;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -88,6 +93,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private string lastLeftRotationSource = "none";
     private string handAlignmentLogPath;
     private bool subscribedToAnchorRefresh;
+    private float nextConfirmedDeskDriftCheckTime;
 
     private void Awake()
     {
@@ -125,7 +131,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             SubscribeAnchorRefresh();
 
         if (ShouldApplyAnchorPoseThisFrame())
+        {
             ApplyNow();
+        }
+        else
+        {
+            CheckConfirmedDeskDrift();
+        }
 
         UpdateHandRotationAlignment();
     }
@@ -409,6 +421,42 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         LoadSavedOffsetFromPrefs();
         ApplySavedOffsetAsConfirmed();
         LogAlignmentEvent($"SavedAnchorRefreshed after apply anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
+    }
+
+    private void CheckConfirmedDeskDrift()
+    {
+        if (!correctConfirmedDeskDrift || !IsAlignmentConfirmed)
+            return;
+
+        if (Time.realtimeSinceStartup < nextConfirmedDeskDriftCheckTime)
+            return;
+
+        nextConfirmedDeskDriftCheckTime = Time.realtimeSinceStartup + Mathf.Max(0.05f, confirmedDeskDriftCheckIntervalSec);
+
+        AutoAssignTargets();
+        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
+        Transform target = deskOrigin != null ? deskOrigin : trackerDeskTransform;
+        if (anchor == null || target == null)
+            return;
+
+        Vector3 expectedPosition = anchor.TransformPoint(localPositionOffset);
+        Quaternion expectedRotation = anchor.rotation * Quaternion.Euler(localEulerOffset);
+        float positionDelta = Vector3.Distance(target.position, expectedPosition);
+        float rotationDelta = Quaternion.Angle(target.rotation, expectedRotation);
+
+        if (positionDelta < confirmedDeskPositionDriftThresholdMeters &&
+            rotationDelta < confirmedDeskRotationDriftThresholdDegrees)
+        {
+            return;
+        }
+
+        LogAlignmentEvent(
+            $"ConfirmedDeskDrift detected posDelta={positionDelta:0.###}m rotDelta={rotationDelta:0.###}deg " +
+            $"anchor={FormatTransform(anchor)} deskBefore={FormatTransform(deskOrigin)} " +
+            $"savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
+        LogAnchorDeskDiagnostic("ConfirmedDeskDrift before", anchor);
+        ApplySavedOffsetAsConfirmed();
+        LogAnchorDeskDiagnostic("ConfirmedDeskDrift after", anchor);
     }
 
     private void UpdateHandRotationAlignment()
