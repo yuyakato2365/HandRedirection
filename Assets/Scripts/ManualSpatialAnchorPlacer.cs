@@ -37,7 +37,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     [Tooltip("Reload the saved persistent anchor after the headset is worn again.")]
     public bool reloadSavedAnchorOnHmdMounted = true;
     [Tooltip("After the HMD-mounted anchor reload finishes, notify desk binding once so DeskOrigin snaps back to the fixed anchor.")]
-    public bool reapplyDeskOriginAfterHmdMountedAnchorReload = true;
+    public bool reapplyDeskOriginAfterHmdMountedAnchorReload = false;
     public float hmdMountedAnchorReloadDelaySec = 1.0f;
     [Tooltip("Use a Unity-world session anchor when Meta/AR anchors are unavailable, e.g. Quest Link / PCVR.")]
     public bool allowPcvrSessionAnchorFallback = true;
@@ -100,6 +100,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public event Action PlacementCanceled;
     public event Action<ARAnchor> AnchorCreated;
     public event Action<Transform> AnchorTransformCreated;
+    public event Action<Transform> SavedAnchorRefreshed;
     public event Action AnchorCleared;
     public event Action<string> AnchorCreateFailed;
 
@@ -370,7 +371,13 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         await WaitForLoadedAnchorPoseStableAsync(currentOvrSpatialAnchor.transform);
         ReportSavedAnchorLoadStatus(notifyDeskOrigin ? "Saved Spatial Anchor loaded" : "Saved Spatial Anchor refreshed", visibleStatus);
         if (notifyDeskOrigin)
+        {
             AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
+        }
+        else
+        {
+            SavedAnchorRefreshed?.Invoke(currentOvrSpatialAnchor.transform);
+        }
     }
 
     private void ReportSavedAnchorLoadStatus(string message, bool visibleStatus, bool warning = false)
