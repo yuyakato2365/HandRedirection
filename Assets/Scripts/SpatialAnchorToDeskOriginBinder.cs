@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
@@ -62,6 +63,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public float confirmedDeskRotationDriftThresholdDegrees = 1f;
     public float confirmedAnchorRelatchPositionThresholdMeters = 0.05f;
     public float confirmedAnchorRelatchRotationThresholdDegrees = 3f;
+    [Tooltip("Reject live Spatial Anchor samples that jump away from the recent average before deciding whether to relatch DeskOrigin.")]
+    public bool rejectAnchorPoseOutliersForRelatch = true;
+    public float anchorPoseAverageWindowSeconds = 3f;
+    public int anchorPoseAverageMinSamples = 5;
+    public float anchorPoseOutlierPositionThresholdMeters = 0.03f;
+    public float anchorPoseOutlierRotationThresholdDegrees = 4f;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -101,6 +108,14 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private bool hasLatchedConfirmedAnchorPose;
     private Vector3 latchedAnchorPosition;
     private Quaternion latchedAnchorRotation = Quaternion.identity;
+    private readonly Queue<AnchorPoseSample> anchorPoseSamples = new Queue<AnchorPoseSample>();
+
+    private struct AnchorPoseSample
+    {
+        public float time;
+        public Vector3 position;
+        public Quaternion rotation;
+    }
 
     private void Awake()
     {
@@ -189,6 +204,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
         hasLatchedConfirmedAnchorPose = false;
+        ClearAnchorPoseSamples();
         HasAlignmentState = true;
         IsAlignmentConfirmed = !requireManualRotationConfirmation;
         wasLeftRotationPinching = IsLeftRotationPinching();
@@ -277,6 +293,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
         hasLatchedConfirmedAnchorPose = false;
+        ClearAnchorPoseSamples();
         wasLeftRotationPinching = false;
         wasLeftFineRotationPinching = false;
         wasRightConfirmPinching = false;
@@ -502,8 +519,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (anchor == null || !TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
             return false;
 
-        float anchorPositionDelta = Vector3.Distance(anchor.position, latchedPosition);
-        float anchorRotationDelta = Quaternion.Angle(anchor.rotation, latchedRotation);
+        if (!TryGetFilteredAnchorPoseForRelatch(anchor, out Vector3 filteredPosition, out Quaternion filteredRotation))
+            return false;
+
+        float anchorPositionDelta = Vector3.Distance(filteredPosition, latchedPosition);
+        float anchorRotationDelta = Quaternion.Angle(filteredRotation, latchedRotation);
         if (anchorPositionDelta < confirmedAnchorRelatchPositionThresholdMeters &&
             anchorRotationDelta < confirmedAnchorRelatchRotationThresholdDegrees)
         {
@@ -512,11 +532,101 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         LogAlignmentEvent(
             $"ConfirmedAnchorRelatch detected posDelta={anchorPositionDelta:0.###}m rotDelta={anchorRotationDelta:0.###}deg " +
-            $"old={FormatLatchedAnchorPose()} new={FormatTransform(anchor)}");
-        CaptureLatchedAnchorPose(anchor, "ConfirmedAnchorRelatch");
+            $"old={FormatLatchedAnchorPose()} filteredAnchor=pos({filteredPosition.x:0.###},{filteredPosition.y:0.###},{filteredPosition.z:0.###}) rot={FormatRotation(filteredRotation)} live={FormatTransform(anchor)}");
+        CaptureLatchedAnchorPose(filteredPosition, filteredRotation, "ConfirmedAnchorRelatchAverage");
         ApplySavedOffsetAsConfirmed(false);
         LogAnchorDeskDiagnostic("ConfirmedAnchorRelatch after", anchor);
         return true;
+    }
+
+    private bool TryGetFilteredAnchorPoseForRelatch(Transform anchor, out Vector3 filteredPosition, out Quaternion filteredRotation)
+    {
+        filteredPosition = anchor.position;
+        filteredRotation = anchor.rotation;
+
+        PruneAnchorPoseSamples();
+        bool hasAverageBeforeCurrent = TryGetAnchorPoseAverage(out Vector3 averagePosition, out Quaternion averageRotation);
+        if (rejectAnchorPoseOutliersForRelatch && hasAverageBeforeCurrent)
+        {
+            float positionFromAverage = Vector3.Distance(anchor.position, averagePosition);
+            float rotationFromAverage = Quaternion.Angle(anchor.rotation, averageRotation);
+            if (positionFromAverage > anchorPoseOutlierPositionThresholdMeters ||
+                rotationFromAverage > anchorPoseOutlierRotationThresholdDegrees)
+            {
+                LogAlignmentEvent(
+                    $"AnchorPoseOutlier ignored posDelta={positionFromAverage:0.###}m rotDelta={rotationFromAverage:0.###}deg " +
+                    $"average=pos({averagePosition.x:0.###},{averagePosition.y:0.###},{averagePosition.z:0.###}) rot={FormatRotation(averageRotation)} live={FormatTransform(anchor)}");
+                return false;
+            }
+        }
+
+        AddAnchorPoseSample(anchor);
+        if (!TryGetAnchorPoseAverage(out filteredPosition, out filteredRotation))
+            return false;
+
+        return true;
+    }
+
+    private void AddAnchorPoseSample(Transform anchor)
+    {
+        anchorPoseSamples.Enqueue(new AnchorPoseSample
+        {
+            time = Time.realtimeSinceStartup,
+            position = anchor.position,
+            rotation = anchor.rotation
+        });
+        PruneAnchorPoseSamples();
+    }
+
+    private void PruneAnchorPoseSamples()
+    {
+        float minTime = Time.realtimeSinceStartup - Mathf.Max(0.1f, anchorPoseAverageWindowSeconds);
+        while (anchorPoseSamples.Count > 0 && anchorPoseSamples.Peek().time < minTime)
+            anchorPoseSamples.Dequeue();
+    }
+
+    private bool TryGetAnchorPoseAverage(out Vector3 averagePosition, out Quaternion averageRotation)
+    {
+        averagePosition = Vector3.zero;
+        averageRotation = Quaternion.identity;
+        if (anchorPoseSamples.Count < Mathf.Max(1, anchorPoseAverageMinSamples))
+            return false;
+
+        Vector4 rotationSum = Vector4.zero;
+        Quaternion referenceRotation = Quaternion.identity;
+        bool hasReferenceRotation = false;
+        foreach (AnchorPoseSample sample in anchorPoseSamples)
+        {
+            averagePosition += sample.position;
+
+            Quaternion rotation = sample.rotation;
+            if (!hasReferenceRotation)
+            {
+                referenceRotation = rotation;
+                hasReferenceRotation = true;
+            }
+            else if (Quaternion.Dot(referenceRotation, rotation) < 0f)
+            {
+                rotation = new Quaternion(-rotation.x, -rotation.y, -rotation.z, -rotation.w);
+            }
+
+            rotationSum += new Vector4(rotation.x, rotation.y, rotation.z, rotation.w);
+        }
+
+        float count = anchorPoseSamples.Count;
+        averagePosition /= count;
+        if (rotationSum.sqrMagnitude > 1e-6f)
+        {
+            rotationSum.Normalize();
+            averageRotation = new Quaternion(rotationSum.x, rotationSum.y, rotationSum.z, rotationSum.w);
+        }
+
+        return true;
+    }
+
+    private void ClearAnchorPoseSamples()
+    {
+        anchorPoseSamples.Clear();
     }
 
     private void UpdateHandRotationAlignment()
@@ -622,10 +732,20 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (!useLatchedAnchorPoseAfterConfirmation || anchor == null)
             return;
 
-        latchedAnchorPosition = anchor.position;
-        latchedAnchorRotation = anchor.rotation;
-        hasLatchedConfirmedAnchorPose = true;
+        CaptureLatchedAnchorPose(anchor.position, anchor.rotation, reason);
         LogAlignmentEvent($"LatchedAnchorPose reason={reason} {FormatLatchedAnchorPose()} liveAnchor={FormatTransform(anchor)}");
+    }
+
+    private void CaptureLatchedAnchorPose(Vector3 position, Quaternion rotation, string reason)
+    {
+        if (!useLatchedAnchorPoseAfterConfirmation)
+            return;
+
+        latchedAnchorPosition = position;
+        latchedAnchorRotation = rotation;
+        hasLatchedConfirmedAnchorPose = true;
+        ClearAnchorPoseSamples();
+        LogAlignmentEvent($"LatchedAnchorPose reason={reason} {FormatLatchedAnchorPose()}");
     }
 
     private bool TryGetLatchedAnchorPose(out Vector3 position, out Quaternion rotation)

@@ -3978,6 +3978,11 @@ MonoBehaviour:
   confirmedDeskRotationDriftThresholdDegrees: 1
   confirmedAnchorRelatchPositionThresholdMeters: 0.05
   confirmedAnchorRelatchRotationThresholdDegrees: 3
+  rejectAnchorPoseOutliersForRelatch: 1
+  anchorPoseAverageWindowSeconds: 3
+  anchorPoseAverageMinSamples: 5
+  anchorPoseOutlierPositionThresholdMeters: 0.03
+  anchorPoseOutlierRotationThresholdDegrees: 4
   applyOnStart: 1
   logAnchorDeskDiagnostics: 1
 --- !u!114 &278646989
