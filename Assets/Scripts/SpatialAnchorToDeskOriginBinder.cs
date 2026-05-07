@@ -64,11 +64,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool allowConfirmedAnchorRelatch = false;
     public float confirmedAnchorRelatchPositionThresholdMeters = 0.05f;
     public float confirmedAnchorRelatchRotationThresholdDegrees = 3f;
-    [Tooltip("Require a relocalized live anchor pose to remain stable before replacing the latched confirmed anchor pose.")]
-    public bool requireStableAnchorBeforeRelatch = true;
-    public float confirmedAnchorRelatchStableSeconds = 1.25f;
-    public float confirmedAnchorRelatchStablePositionThresholdMeters = 0.006f;
-    public float confirmedAnchorRelatchStableRotationThresholdDegrees = 0.5f;
     public bool applyOnStart = true;
 
     [Header("Debug")]
@@ -108,10 +103,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private bool hasLatchedConfirmedAnchorPose;
     private Vector3 latchedAnchorPosition;
     private Quaternion latchedAnchorRotation = Quaternion.identity;
-    private bool hasRelatchCandidate;
-    private float relatchCandidateStableStartTime;
-    private Vector3 relatchCandidatePosition;
-    private Quaternion relatchCandidateRotation = Quaternion.identity;
 
     private void Awake()
     {
@@ -200,7 +191,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
         hasLatchedConfirmedAnchorPose = false;
-        ResetRelatchCandidate();
         HasAlignmentState = true;
         IsAlignmentConfirmed = !requireManualRotationConfirmation;
         wasLeftRotationPinching = IsLeftRotationPinching();
@@ -289,7 +279,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
         hasLatchedConfirmedAnchorPose = false;
-        ResetRelatchCandidate();
         wasLeftRotationPinching = false;
         wasLeftFineRotationPinching = false;
         wasRightConfirmPinching = false;
@@ -523,67 +512,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (anchorPositionDelta < confirmedAnchorRelatchPositionThresholdMeters &&
             anchorRotationDelta < confirmedAnchorRelatchRotationThresholdDegrees)
         {
-            ResetRelatchCandidate();
             return false;
         }
-
-        if (requireStableAnchorBeforeRelatch && !IsRelatchCandidateStable(anchor))
-            return true;
 
         LogAlignmentEvent(
             $"ConfirmedAnchorRelatch detected posDelta={anchorPositionDelta:0.###}m rotDelta={anchorRotationDelta:0.###}deg " +
             $"old={FormatLatchedAnchorPose()} new={FormatTransform(anchor)}");
         CaptureLatchedAnchorPose(anchor, "ConfirmedAnchorRelatch");
-        ResetRelatchCandidate();
         ApplySavedOffsetAsConfirmed(false);
         LogAnchorDeskDiagnostic("ConfirmedAnchorRelatch after", anchor);
         return true;
-    }
-
-    private bool IsRelatchCandidateStable(Transform anchor)
-    {
-        if (anchor == null)
-            return false;
-
-        if (!hasRelatchCandidate)
-        {
-            hasRelatchCandidate = true;
-            relatchCandidateStableStartTime = Time.realtimeSinceStartup;
-            relatchCandidatePosition = anchor.position;
-            relatchCandidateRotation = anchor.rotation;
-            LogAlignmentEvent($"ConfirmedAnchorRelatch candidate started anchor={FormatTransform(anchor)}");
-            return false;
-        }
-
-        float positionDelta = Vector3.Distance(anchor.position, relatchCandidatePosition);
-        float rotationDelta = Quaternion.Angle(anchor.rotation, relatchCandidateRotation);
-        bool stable = positionDelta <= confirmedAnchorRelatchStablePositionThresholdMeters &&
-                      rotationDelta <= confirmedAnchorRelatchStableRotationThresholdDegrees;
-        if (!stable)
-        {
-            relatchCandidateStableStartTime = Time.realtimeSinceStartup;
-            relatchCandidatePosition = anchor.position;
-            relatchCandidateRotation = anchor.rotation;
-            LogAlignmentEvent(
-                $"ConfirmedAnchorRelatch candidate reset posDelta={positionDelta:0.###}m rotDelta={rotationDelta:0.###}deg " +
-                $"anchor={FormatTransform(anchor)}");
-            return false;
-        }
-
-        float stableSeconds = Time.realtimeSinceStartup - relatchCandidateStableStartTime;
-        if (stableSeconds < confirmedAnchorRelatchStableSeconds)
-            return false;
-
-        LogAlignmentEvent($"ConfirmedAnchorRelatch candidate stable {stableSeconds:0.###}s anchor={FormatTransform(anchor)}");
-        return true;
-    }
-
-    private void ResetRelatchCandidate()
-    {
-        hasRelatchCandidate = false;
-        relatchCandidateStableStartTime = 0f;
-        relatchCandidatePosition = Vector3.zero;
-        relatchCandidateRotation = Quaternion.identity;
     }
 
     private void UpdateHandRotationAlignment()
