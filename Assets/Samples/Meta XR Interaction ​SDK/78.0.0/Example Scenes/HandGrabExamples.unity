@@ -3970,7 +3970,9 @@ MonoBehaviour:
   requireRightPinchReleaseBeforeConfirm: 1
   followEveryFrame: 1
   followConfirmedAnchorEveryFrame: 0
+  reapplySavedOffsetOnAnchorRefresh: 1
   applyOnStart: 1
+  logAnchorDeskDiagnostics: 1
 --- !u!114 &278646989
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -51,12 +51,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool followEveryFrame = true;
     [Tooltip("Keep applying anchor pose after desk alignment is confirmed. Usually false avoids head-motion drift from live anchor updates.")]
     public bool followConfirmedAnchorEveryFrame = false;
+    [Tooltip("When the saved persistent anchor is refreshed after HMD remount, reapply the saved Anchor -> DeskOrigin offset once.")]
+    public bool reapplySavedOffsetOnAnchorRefresh = true;
     public bool applyOnStart = true;
 
     [Header("Debug")]
     public bool logHandAlignmentDebug = true;
     public bool writeHandAlignmentLogFile = true;
     public float activePinchLogIntervalSec = 0.25f;
+    public bool logAnchorDeskDiagnostics = true;
 
     public bool HasAlignmentState { get; private set; }
     public bool IsAlignmentConfirmed { get; private set; }
@@ -84,6 +87,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private float nextLeftWristFailureLogTime;
     private string lastLeftRotationSource = "none";
     private string handAlignmentLogPath;
+    private bool subscribedToAnchorRefresh;
 
     private void Awake()
     {
@@ -99,12 +103,27 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void Start()
     {
+        SubscribeAnchorRefresh();
+
         if (applyOnStart)
             ApplyNow();
     }
 
+    private void OnEnable()
+    {
+        SubscribeAnchorRefresh();
+    }
+
+    private void OnDisable()
+    {
+        UnsubscribeAnchorRefresh();
+    }
+
     private void LateUpdate()
     {
+        if (!subscribedToAnchorRefresh)
+            SubscribeAnchorRefresh();
+
         if (ShouldApplyAnchorPoseThisFrame())
             ApplyNow();
 
@@ -217,10 +236,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         ApplyNow();
         CaptureCurrentDeskAsOffset();
         SaveCurrentOffsetToPrefs();
+        LogAnchorDeskDiagnostic("ConfirmManualRotationAlignment saved", anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null);
         initialAlignmentRotation = GetCurrentTargetRotation(Quaternion.identity);
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
-        LogAlignmentEvent($"ConfirmManualRotationAlignment finalDesk={FormatTransform(deskOrigin)} handAdjustment={FormatRotation(handRotationAdjustment)} yaw={yawAdjustmentDegrees:0.###}");
+        LogAlignmentEvent($"ConfirmManualRotationAlignment finalDesk={FormatTransform(deskOrigin)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset} handAdjustment={FormatRotation(handRotationAdjustment)} yaw={yawAdjustmentDegrees:0.###}");
         AlignmentConfirmed?.Invoke();
     }
 
@@ -248,6 +268,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         localPositionOffset = Quaternion.Inverse(anchor.rotation) * (target.position - anchor.position);
         localEulerOffset = (Quaternion.Inverse(anchor.rotation) * target.rotation).eulerAngles;
+        LogAlignmentEvent($"CaptureCurrentDeskAsOffset anchor={FormatTransform(anchor)} target={FormatTransform(target)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
     }
 
     public bool LoadSavedOffsetFromPrefs()
@@ -311,7 +332,10 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         handRotationAdjustment = Quaternion.identity;
         HasAlignmentState = true;
         IsAlignmentConfirmed = true;
+        LogAlignmentEvent($"ApplySavedOffsetAsConfirmed begin anchor={FormatTransform(anchor)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
+        LogAnchorDeskDiagnostic("ApplySavedOffsetAsConfirmed before", anchor);
         ApplyNow();
+        LogAnchorDeskDiagnostic("ApplySavedOffsetAsConfirmed after", anchor);
         LogAlignmentEvent($"ApplySavedOffsetAsConfirmed desk={FormatTransform(deskOrigin)}");
         AlignmentConfirmed?.Invoke();
     }
@@ -346,6 +370,45 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return true;
 
         return !IsAlignmentConfirmed || followConfirmedAnchorEveryFrame;
+    }
+
+    private void SubscribeAnchorRefresh()
+    {
+        if (subscribedToAnchorRefresh)
+            return;
+
+        if (anchorPlacer == null)
+            anchorPlacer = FindAnyObjectByType<ManualSpatialAnchorPlacer>();
+        if (anchorPlacer == null)
+            return;
+
+        anchorPlacer.SavedAnchorRefreshed += OnSavedAnchorRefreshed;
+        subscribedToAnchorRefresh = true;
+    }
+
+    private void UnsubscribeAnchorRefresh()
+    {
+        if (!subscribedToAnchorRefresh)
+            return;
+
+        if (anchorPlacer != null)
+            anchorPlacer.SavedAnchorRefreshed -= OnSavedAnchorRefreshed;
+        subscribedToAnchorRefresh = false;
+    }
+
+    private void OnSavedAnchorRefreshed(Transform anchor)
+    {
+        if (!reapplySavedOffsetOnAnchorRefresh)
+        {
+            LogAlignmentEvent($"SavedAnchorRefreshed ignored reapplySavedOffsetOnAnchorRefresh=false anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)}");
+            return;
+        }
+
+        AutoAssignTargets();
+        LogAlignmentEvent($"SavedAnchorRefreshed before load anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
+        LoadSavedOffsetFromPrefs();
+        ApplySavedOffsetAsConfirmed();
+        LogAlignmentEvent($"SavedAnchorRefreshed after apply anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
     }
 
     private void UpdateHandRotationAlignment()
@@ -769,6 +832,34 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         }
     }
 
+    private void LogAnchorDeskDiagnostic(string label, Transform anchor)
+    {
+        if (!logAnchorDeskDiagnostics)
+            return;
+
+        Vector3 targetPos = Vector3.zero;
+        Quaternion targetRot = Quaternion.identity;
+        if (anchor != null)
+        {
+            targetPos = anchor.TransformPoint(localPositionOffset);
+            targetRot = ResolveTargetRotation(anchor);
+        }
+
+        string actualOffset = "actualOffset=null";
+        if (anchor != null && deskOrigin != null)
+        {
+            Vector3 actualPosOffset = Quaternion.Inverse(anchor.rotation) * (deskOrigin.position - anchor.position);
+            Vector3 actualEulerOffset = (Quaternion.Inverse(anchor.rotation) * deskOrigin.rotation).eulerAngles;
+            actualOffset = $"actualOffsetPos={actualPosOffset} actualOffsetEuler={actualEulerOffset}";
+        }
+
+        LogAlignmentEvent(
+            $"{label} anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)} " +
+            $"targetPos=({targetPos.x:0.###},{targetPos.y:0.###},{targetPos.z:0.###}) targetRot={FormatRotation(targetRot)} " +
+            $"savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset} {actualOffset} " +
+            $"deskChildren={BuildChildSummary(deskOrigin)}");
+    }
+
     private string BuildSourceDebugString()
     {
         return $"leftProvider={GetObjectName(leftRotationPinchProvider)} rightProvider={GetObjectName(rightConfirmPinchProvider)} " +
@@ -804,6 +895,23 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private static string GetObjectName(UnityEngine.Object obj)
     {
         return obj != null ? obj.name : "null";
+    }
+
+    private static string BuildChildSummary(Transform transform)
+    {
+        if (transform == null)
+            return "null";
+
+        int count = transform.childCount;
+        if (count == 0)
+            return "0";
+
+        string summary = count.ToString();
+        int maxNames = Mathf.Min(count, 5);
+        for (int i = 0; i < maxNames; i++)
+            summary += i == 0 ? $"[{transform.GetChild(i).name}" : $",{transform.GetChild(i).name}";
+        summary += count > maxNames ? ",...]" : "]";
+        return summary;
     }
 
     private static string FormatRotation(Quaternion rotation)
