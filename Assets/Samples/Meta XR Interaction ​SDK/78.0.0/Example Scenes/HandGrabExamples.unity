@@ -3976,6 +3976,7 @@ MonoBehaviour:
   confirmedDeskDriftCheckIntervalSec: 0.5
   confirmedDeskPositionDriftThresholdMeters: 0.02
   confirmedDeskRotationDriftThresholdDegrees: 1
+  allowConfirmedAnchorRelatch: 0
   confirmedAnchorRelatchPositionThresholdMeters: 0.05
   confirmedAnchorRelatchRotationThresholdDegrees: 3
   applyOnStart: 1
