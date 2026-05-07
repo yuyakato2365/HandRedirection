@@ -60,8 +60,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public float confirmedDeskDriftCheckIntervalSec = 0.5f;
     public float confirmedDeskPositionDriftThresholdMeters = 0.02f;
     public float confirmedDeskRotationDriftThresholdDegrees = 1f;
-    [Tooltip("Allow the confirmed anchor pose to be replaced automatically after a large live Spatial Anchor move. Keep false to prevent sudden desk angle jumps from anchor pose jitter.")]
-    public bool allowConfirmedAnchorRelatch = false;
     public float confirmedAnchorRelatchPositionThresholdMeters = 0.05f;
     public float confirmedAnchorRelatchRotationThresholdDegrees = 3f;
     public bool applyOnStart = true;
@@ -501,9 +499,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private bool TryRelatchConfirmedAnchorAfterLargeMove(Transform anchor)
     {
-        if (!allowConfirmedAnchorRelatch)
-            return false;
-
         if (anchor == null || !TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
             return false;
 
