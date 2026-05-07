@@ -34,8 +34,10 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public float savedAnchorMaxStabilizeWaitSeconds = 3.0f;
     public float savedAnchorStablePositionThresholdMeters = 0.003f;
     public float savedAnchorStableRotationThresholdDegrees = 0.25f;
-    [Tooltip("Reload the saved persistent anchor after the headset is worn again. This refreshes the anchor only; DeskOrigin is not moved.")]
+    [Tooltip("Reload the saved persistent anchor after the headset is worn again.")]
     public bool reloadSavedAnchorOnHmdMounted = true;
+    [Tooltip("After the HMD-mounted anchor reload finishes, notify desk binding once so DeskOrigin snaps back to the fixed anchor.")]
+    public bool reapplyDeskOriginAfterHmdMountedAnchorReload = true;
     public float hmdMountedAnchorReloadDelaySec = 1.0f;
     [Tooltip("Use a Unity-world session anchor when Meta/AR anchors are unavailable, e.g. Quest Link / PCVR.")]
     public bool allowPcvrSessionAnchorFallback = true;
@@ -144,7 +146,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         {
             pendingHmdMountedAnchorReload = false;
             if (!IsPlacementMode && !isCreatingAnchor && HasSavedAnchor)
-                ReloadSavedAnchorOnly();
+            {
+                if (reapplyDeskOriginAfterHmdMountedAnchorReload)
+                    ReloadSavedAnchorAndReapplyDeskOrigin();
+                else
+                    ReloadSavedAnchorOnly();
+            }
         }
 
         if (isCreatingAnchor)
@@ -301,35 +308,40 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     public async void LoadSavedAnchor()
     {
-        await LoadSavedAnchorAsync(true);
+        await LoadSavedAnchorAsync(true, true);
     }
 
     public async void ReloadSavedAnchorOnly()
     {
-        await LoadSavedAnchorAsync(false);
+        await LoadSavedAnchorAsync(false, false);
     }
 
-    private async System.Threading.Tasks.Task LoadSavedAnchorAsync(bool notifyDeskOrigin)
+    public async void ReloadSavedAnchorAndReapplyDeskOrigin()
+    {
+        await LoadSavedAnchorAsync(true, false);
+    }
+
+    private async System.Threading.Tasks.Task LoadSavedAnchorAsync(bool notifyDeskOrigin, bool visibleStatus)
     {
         if (!useOvrSpatialAnchorPersistence)
         {
-            ReportSavedAnchorLoadStatus("OVR Spatial Anchor persistence is disabled", notifyDeskOrigin);
+            ReportSavedAnchorLoadStatus("OVR Spatial Anchor persistence is disabled", visibleStatus);
             return;
         }
 
         string savedUuid = PlayerPrefs.GetString(savedAnchorPlayerPrefsKey, "");
         if (!Guid.TryParse(savedUuid, out Guid uuid) || uuid == Guid.Empty)
         {
-            ReportSavedAnchorLoadStatus("No saved Spatial Anchor UUID", notifyDeskOrigin);
+            ReportSavedAnchorLoadStatus("No saved Spatial Anchor UUID", visibleStatus);
             return;
         }
 
-        ReportSavedAnchorLoadStatus("Loading saved Spatial Anchor...", notifyDeskOrigin);
+        ReportSavedAnchorLoadStatus("Loading saved Spatial Anchor...", visibleStatus);
         List<OVRSpatialAnchor.UnboundAnchor> unboundAnchors = new List<OVRSpatialAnchor.UnboundAnchor>();
         var loadResult = await OVRSpatialAnchor.LoadUnboundAnchorsAsync(new[] { uuid }, unboundAnchors);
         if (!loadResult.Success || unboundAnchors.Count == 0)
         {
-            ReportSavedAnchorLoadStatus($"Saved Spatial Anchor load failed\n{loadResult.Status}", notifyDeskOrigin, true);
+            ReportSavedAnchorLoadStatus($"Saved Spatial Anchor load failed\n{loadResult.Status}", visibleStatus, true);
             AnchorCreateFailed?.Invoke(loadResult.Status.ToString());
             return;
         }
@@ -338,7 +350,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         bool localized = await unboundAnchor.LocalizeAsync(savedAnchorLocalizationTimeoutSec);
         if (!localized)
         {
-            ReportSavedAnchorLoadStatus("Saved Spatial Anchor localization failed", notifyDeskOrigin, true);
+            ReportSavedAnchorLoadStatus("Saved Spatial Anchor localization failed", visibleStatus, true);
             AnchorCreateFailed?.Invoke("Saved Spatial Anchor localization failed");
             return;
         }
@@ -354,9 +366,9 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         LastAnchorWasLoadedSavedAnchor = true;
 
         CreateMarkerUnder(currentOvrSpatialAnchor.transform, "LoadedPersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
-        ReportSavedAnchorLoadStatus("Saved Spatial Anchor localized\nWaiting for stable pose...", notifyDeskOrigin);
+        ReportSavedAnchorLoadStatus("Saved Spatial Anchor localized\nWaiting for stable pose...", visibleStatus);
         await WaitForLoadedAnchorPoseStableAsync(currentOvrSpatialAnchor.transform);
-        ReportSavedAnchorLoadStatus(notifyDeskOrigin ? "Saved Spatial Anchor loaded" : "Saved Spatial Anchor refreshed", notifyDeskOrigin);
+        ReportSavedAnchorLoadStatus(notifyDeskOrigin ? "Saved Spatial Anchor loaded" : "Saved Spatial Anchor refreshed", visibleStatus);
         if (notifyDeskOrigin)
             AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
     }

@@ -4014,6 +4014,7 @@ MonoBehaviour:
   savedAnchorStablePositionThresholdMeters: 0.003
   savedAnchorStableRotationThresholdDegrees: 0.25
   reloadSavedAnchorOnHmdMounted: 1
+  reapplyDeskOriginAfterHmdMountedAnchorReload: 1
   hmdMountedAnchorReloadDelaySec: 1
   allowPcvrSessionAnchorFallback: 1
   anchorCreateTimeoutSec: 4
