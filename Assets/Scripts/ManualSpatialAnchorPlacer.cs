@@ -82,6 +82,13 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     [Tooltip("World-space offset applied to the final anchor placement pose. Use negative Y to place the anchor below the hand marker.")]
     public Vector3 anchorPlacementWorldOffset = new Vector3(0f, -0.08f, 0f);
 
+    [Header("Hand Placement Confirmation")]
+    [Tooltip("Right-hand pinch once locks the candidate pose, hold while locked fine-adjusts it, and two quick pinches confirm placement.")]
+    public bool useTwoPinchPlacementConfirmation = true;
+    public float doublePinchConfirmMaxGapSec = 0.45f;
+    public float tapPinchMaxDurationSec = 0.25f;
+    public float holdToFineAdjustDelaySec = 0.35f;
+
     [Header("Editor Debug Input")]
     public bool enableKeyboardInput = true;
     public KeyCode beginKey = KeyCode.B;
@@ -95,6 +102,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public Pose CandidatePose => candidatePose;
     public bool IsPlacementMode { get; private set; }
     public bool IsCreatingAnchor => isCreatingAnchor;
+    public bool IsCandidatePoseLocked => candidatePoseLocked;
+    public bool IsCandidatePoseBeingAdjusted => candidatePoseLocked && adjustingLockedPoseWithHold;
     public bool HasAnchor => CurrentAnchor != null || currentOvrSpatialAnchor != null || sessionAnchorTransform != null;
     public bool HasSavedAnchor => Guid.TryParse(PlayerPrefs.GetString(savedAnchorPlayerPrefsKey, ""), out Guid uuid) && uuid != Guid.Empty;
     public bool LastAnchorWasLoadedSavedAnchor { get; private set; }
@@ -102,6 +111,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public event Action PlacementStarted;
     public event Action PlacementCanceled;
     public event Action<Pose> CandidatePoseUpdated;
+    public event Action CandidatePoseConfirmRequested;
     public event Action<ARAnchor> AnchorCreated;
     public event Action<Transform> AnchorTransformCreated;
     public event Action<Transform> SavedAnchorRefreshed;
@@ -113,6 +123,10 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     private OVRSpatialAnchor currentOvrSpatialAnchor;
     private Transform sessionAnchorTransform;
     private bool wasPinching;
+    private bool candidatePoseLocked;
+    private bool adjustingLockedPoseWithHold;
+    private float pinchStartTime;
+    private float lastTapPinchReleaseTime = -999f;
     private string placementStatusHint = "";
     private bool isCreatingAnchor;
     private bool isCreatingPersistentOvrAnchor;
@@ -184,7 +198,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             return;
 
         TryAutoAssignHand();
-        UpdateCandidatePose();
+        if (ShouldUpdateCandidatePoseFromSource())
+            UpdateCandidatePose();
 
         if (enableKeyboardInput && Input.GetKeyDown(confirmKey))
             ConfirmPlacement();
@@ -206,12 +221,19 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             float pinchStrength = confirmHand.GetFingerPinchStrength(confirmFinger);
             bool pinching = confirmHand.IsTracked &&
                             (confirmHand.GetFingerIsPinching(confirmFinger) || pinchStrength >= pinchConfirmThreshold);
-            if (pinching && !wasPinching)
-                ConfirmPlacement();
-            if (!pinching && pinchStrength <= pinchReleaseThreshold)
-                wasPinching = false;
-            else if (pinching)
-                wasPinching = true;
+            if (useTwoPinchPlacementConfirmation)
+            {
+                UpdateTwoPinchPlacementInput(pinching, pinchStrength);
+            }
+            else
+            {
+                if (pinching && !wasPinching)
+                    ConfirmPlacement();
+                if (!pinching && pinchStrength <= pinchReleaseThreshold)
+                    wasPinching = false;
+                else if (pinching)
+                    wasPinching = true;
+            }
         }
 
         UpdatePlacementStatusHint();
@@ -228,6 +250,10 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         RefreshFallbackCamera();
         IsPlacementMode = true;
         wasPinching = false;
+        candidatePoseLocked = false;
+        adjustingLockedPoseWithHold = false;
+        pinchStartTime = 0f;
+        lastTapPinchReleaseTime = -999f;
         UpdateCandidatePose();
         SetPreviewActive(true);
         placementStatusHint = "Anchor placement started";
@@ -241,6 +267,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             return;
 
         IsPlacementMode = false;
+        candidatePoseLocked = false;
+        adjustingLockedPoseWithHold = false;
         SetPreviewActive(false);
         SetStatusMessage("Anchor placement canceled");
         PlacementCanceled?.Invoke();
@@ -255,6 +283,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         }
 
         IsPlacementMode = false;
+        candidatePoseLocked = false;
+        adjustingLockedPoseWithHold = false;
         SetPreviewActive(false);
         SetStatusMessage("Creating Spatial Anchor...");
         isCreatingAnchor = true;
@@ -486,11 +516,83 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             }
         }
 
+        string instructionLine = useTwoPinchPlacementConfirmation
+            ? (candidatePoseLocked
+                ? "Pose locked\nHold right pinch to fine-adjust\nDouble pinch to confirm"
+                : "Move the hand marker\nRight pinch once to lock")
+            : $"Pinch to confirm, threshold {pinchConfirmThreshold:0.00}";
+
         statusText.text =
             $"{placementStatusHint}\n" +
-            "Move the hand marker to the reference point\n" +
-            $"Pinch to confirm, threshold {pinchConfirmThreshold:0.00}\n" +
+            instructionLine + "\n" +
             handLine;
+    }
+
+    private bool ShouldUpdateCandidatePoseFromSource()
+    {
+        return !candidatePoseLocked || adjustingLockedPoseWithHold;
+    }
+
+    private void UpdateTwoPinchPlacementInput(bool pinching, float pinchStrength)
+    {
+        float now = Time.realtimeSinceStartup;
+
+        if (pinching && !wasPinching)
+        {
+            pinchStartTime = now;
+            adjustingLockedPoseWithHold = false;
+        }
+
+        if (pinching && candidatePoseLocked && !adjustingLockedPoseWithHold &&
+            now - pinchStartTime >= Mathf.Max(0.01f, holdToFineAdjustDelaySec))
+        {
+            adjustingLockedPoseWithHold = true;
+            lastTapPinchReleaseTime = -999f;
+            SetStatusMessage("Fine-adjusting locked anchor pose");
+        }
+
+        if (!pinching && wasPinching && pinchStrength <= pinchReleaseThreshold)
+        {
+            float pinchDuration = now - pinchStartTime;
+            bool wasFineAdjusting = adjustingLockedPoseWithHold;
+            adjustingLockedPoseWithHold = false;
+
+            if (wasFineAdjusting)
+            {
+                candidatePoseLocked = true;
+                lastTapPinchReleaseTime = -999f;
+                SetStatusMessage("Anchor pose locked");
+            }
+            else if (!candidatePoseLocked)
+            {
+                candidatePoseLocked = true;
+                lastTapPinchReleaseTime = now;
+                SetStatusMessage("Anchor pose locked\nDouble pinch to confirm");
+            }
+            else if (pinchDuration <= Mathf.Max(0.01f, tapPinchMaxDurationSec) &&
+                     now - lastTapPinchReleaseTime <= Mathf.Max(0.05f, doublePinchConfirmMaxGapSec))
+            {
+                RequestCandidatePoseConfirmation();
+            }
+            else
+            {
+                lastTapPinchReleaseTime = now;
+                SetStatusMessage("Anchor pose locked\nDouble pinch to confirm");
+            }
+        }
+
+        if (!pinching && pinchStrength <= pinchReleaseThreshold)
+            wasPinching = false;
+        else if (pinching)
+            wasPinching = true;
+    }
+
+    private void RequestCandidatePoseConfirmation()
+    {
+        if (CandidatePoseConfirmRequested != null)
+            CandidatePoseConfirmRequested.Invoke();
+        else
+            ConfirmPlacement();
     }
 
     private void TryAutoAssignHand()

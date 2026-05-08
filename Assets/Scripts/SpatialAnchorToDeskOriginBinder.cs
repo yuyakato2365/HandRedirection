@@ -195,6 +195,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             CheckConfirmedDeskDrift();
         }
 
+        UpdateDeskTransparencyForPlacementState();
         UpdateHandRotationAlignment();
     }
 
@@ -243,7 +244,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         wasLeftFineRotationPinching = IsLeftFineRotationPinching();
         wasRightConfirmPinching = IsRightConfirmPinching();
         waitingForRightConfirmRelease = requireRightPinchReleaseBeforeConfirm;
-        SetDeskTransparency(true);
+        UpdateDeskTransparencyForPlacementState();
         ApplyNow();
         LogAlignmentEvent(
             $"BeginManualRotationAlignment initial={FormatRotation(initialAlignmentRotation)} " +
@@ -859,6 +860,21 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             ApplyDeskTransparency();
         else
             RestoreDeskTransparency();
+    }
+
+    private void UpdateDeskTransparencyForPlacementState()
+    {
+        if (!IsAdjustingAlignment)
+            return;
+
+        if (previewDeskDuringAnchorPlacement && anchorPlacer != null && anchorPlacer.IsPlacementMode)
+        {
+            bool shouldBeTransparent = !anchorPlacer.IsCandidatePoseLocked || anchorPlacer.IsCandidatePoseBeingAdjusted;
+            SetDeskTransparency(shouldBeTransparent);
+            return;
+        }
+
+        SetDeskTransparency(true);
     }
 
     private void ApplyDeskTransparency()

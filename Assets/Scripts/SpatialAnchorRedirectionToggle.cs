@@ -140,6 +140,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
         placer.PlacementStarted += OnPlacementStarted;
         placer.PlacementCanceled += OnPlacementCanceled;
+        placer.CandidatePoseConfirmRequested += OnCandidatePoseConfirmRequested;
         placer.AnchorTransformCreated += OnAnchorTransformCreated;
         placer.AnchorCleared += OnAnchorCleared;
         placer.AnchorCreateFailed += OnAnchorCreateFailed;
@@ -152,6 +153,7 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
         placer.PlacementStarted -= OnPlacementStarted;
         placer.PlacementCanceled -= OnPlacementCanceled;
+        placer.CandidatePoseConfirmRequested -= OnCandidatePoseConfirmRequested;
         placer.AnchorTransformCreated -= OnAnchorTransformCreated;
         placer.AnchorCleared -= OnAnchorCleared;
         placer.AnchorCreateFailed -= OnAnchorCreateFailed;
@@ -205,6 +207,18 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         }
 
         SetMode(CurrentMode);
+    }
+
+    private void OnCandidatePoseConfirmRequested()
+    {
+        if (deskBinder != null && deskBinder.IsAdjustingAlignment)
+        {
+            deskBinder.ConfirmManualRotationAlignment();
+            return;
+        }
+
+        if (placer != null && placer.IsPlacementMode)
+            placer.ConfirmPlacement();
     }
 
     private void OnAnchorTransformCreated(Transform anchorTransform)
