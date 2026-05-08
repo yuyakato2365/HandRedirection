@@ -1005,7 +1005,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (anchorMarkerPrefab == null)
         {
             anchorMarkerInstance.transform.SetParent(parent, false);
-            anchorMarkerInstance.transform.localScale = Vector3.one * 0.06f;
+            anchorMarkerInstance.transform.localScale = Vector3.one * 0.03f;
             RemoveCollider(anchorMarkerInstance);
             SetPrimitiveColor(anchorMarkerInstance, fallbackColor);
         }
@@ -1029,7 +1029,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         {
             previewObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             previewObject.name = "SpatialAnchorPreview";
-            previewObject.transform.localScale = Vector3.one * 0.08f;
+            previewObject.transform.localScale = Vector3.one * 0.04f;
             RemoveCollider(previewObject);
             SetPrimitiveColor(previewObject, new Color(1f, 0.85f, 0.05f, 0.75f));
         }
