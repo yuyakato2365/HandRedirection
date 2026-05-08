@@ -73,7 +73,7 @@ function Poll-Status {
 
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = "Spatial Anchor Calibration Control"
-$form.Size = [System.Drawing.Size]::new(560, 700)
+$form.Size = [System.Drawing.Size]::new(560, 744)
 $form.StartPosition = "CenterScreen"
 
 $ipLabel = [System.Windows.Forms.Label]::new()
@@ -244,14 +244,23 @@ $disableButton.Add_Click({
 })
 $form.Controls.Add($disableButton)
 
-$statusTitle.Location = [System.Drawing.Point]::new(16, 508)
+$nextParticipantButton = [System.Windows.Forms.Button]::new()
+$nextParticipantButton.Text = "Next Participant / Reset Objects"
+$nextParticipantButton.Location = [System.Drawing.Point]::new(16, 502)
+$nextParticipantButton.Size = [System.Drawing.Size]::new(510, 34)
+$nextParticipantButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT"
+})
+$form.Controls.Add($nextParticipantButton)
+
+$statusTitle.Location = [System.Drawing.Point]::new(16, 552)
 $statusTitle.Size = [System.Drawing.Size]::new(80, 24)
 $form.Controls.Add($statusTitle)
 
 $statusLabel = [System.Windows.Forms.Label]::new()
 $statusLabel.Text = "Waiting for status"
 $statusLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D
-$statusLabel.Location = [System.Drawing.Point]::new(16, 534)
+$statusLabel.Location = [System.Drawing.Point]::new(16, 578)
 $statusLabel.Size = [System.Drawing.Size]::new(510, 28)
 $form.Controls.Add($statusLabel)
 
@@ -259,7 +268,7 @@ $logBox = [System.Windows.Forms.TextBox]::new()
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
-$logBox.Location = [System.Drawing.Point]::new(16, 574)
+$logBox.Location = [System.Drawing.Point]::new(16, 618)
 $logBox.Size = [System.Drawing.Size]::new(510, 72)
 $form.Controls.Add($logBox)
 

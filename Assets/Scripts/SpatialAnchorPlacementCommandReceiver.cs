@@ -22,6 +22,9 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
     public SpatialAnchorToDeskOriginBinder deskBinder;
     public SpatialAnchorRedirectionToggle featureToggle;
 
+    [Header("Exhibition Reset")]
+    public ExhibitionExperienceResetter experienceResetter;
+
     [Header("Debug")]
     public bool logCommands = false;
 
@@ -40,6 +43,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
         if (featureToggle == null)
             featureToggle = FindAnyObjectByType<SpatialAnchorRedirectionToggle>();
+        EnsureExperienceResetter();
     }
 
     private void OnEnable()
@@ -305,6 +309,13 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                     SendStatus("ERROR toggle_not_assigned");
                 }
                 break;
+            case "NEXT_PARTICIPANT":
+            case "RESET_FOR_NEXT_PARTICIPANT":
+            case "RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT":
+            case "RESET_OBJECT_SCALES":
+                int restoredCount = ResetExperienceForNextParticipant();
+                SendStatus($"NEXT_PARTICIPANT_RESET_DONE {restoredCount}");
+                break;
             case "PING":
                 placer.SetStatusMessage("PING received from PC");
                 SendStatus("PONG");
@@ -353,6 +364,28 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
 
         SendStatus("ERROR desk_binder_not_assigned");
         return false;
+    }
+
+    private void EnsureExperienceResetter()
+    {
+        if (experienceResetter != null)
+            return;
+
+        experienceResetter = FindAnyObjectByType<ExhibitionExperienceResetter>();
+        if (experienceResetter != null)
+            return;
+
+        GameObject resetterObject = new GameObject("ExhibitionExperienceResetter");
+        experienceResetter = resetterObject.AddComponent<ExhibitionExperienceResetter>();
+    }
+
+    private int ResetExperienceForNextParticipant()
+    {
+        EnsureExperienceResetter();
+        if (experienceResetter == null)
+            return 0;
+
+        return experienceResetter.ResetForNextParticipant();
     }
 
     private void SendStatus(string message)
