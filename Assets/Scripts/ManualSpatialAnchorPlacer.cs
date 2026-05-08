@@ -128,6 +128,9 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     private bool adjustingLockedPoseWithHold;
     private float pinchStartTime;
     private float lastTapPinchReleaseTime = -999f;
+    private bool hasRelativeAdjustStartPose;
+    private Pose lockedCandidatePoseAtAdjustStart;
+    private Pose handCandidatePoseAtAdjustStart;
     private string placementStatusHint = "";
     private bool isCreatingAnchor;
     private bool isCreatingPersistentOvrAnchor;
@@ -544,6 +547,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (pinching && candidatePoseLocked && !adjustingLockedPoseWithHold &&
             now - pinchStartTime >= Mathf.Max(0.01f, holdToFineAdjustDelaySec))
         {
+            BeginRelativePoseAdjustment();
             SetCandidatePoseLockState(true, true);
             lastTapPinchReleaseTime = -999f;
             SetStatusMessage("Fine-adjusting locked anchor pose");
@@ -556,6 +560,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
             if (wasFineAdjusting)
             {
+                hasRelativeAdjustStartPose = false;
                 SetCandidatePoseLockState(true, false);
                 lastTapPinchReleaseTime = -999f;
                 SetStatusMessage("Anchor pose locked");
@@ -592,6 +597,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             ConfirmPlacement();
     }
 
+    private void BeginRelativePoseAdjustment()
+    {
+        lockedCandidatePoseAtAdjustStart = candidatePose;
+        hasRelativeAdjustStartPose = TryComputeCandidatePoseFromSource(out handCandidatePoseAtAdjustStart);
+    }
+
     private void SetCandidatePoseLockState(bool locked, bool adjusting)
     {
         adjusting = locked && adjusting;
@@ -600,6 +611,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         candidatePoseLocked = locked;
         adjustingLockedPoseWithHold = adjusting;
+        if (!adjustingLockedPoseWithHold)
+            hasRelativeAdjustStartPose = false;
         CandidatePoseLockStateChanged?.Invoke(candidatePoseLocked, adjustingLockedPoseWithHold);
     }
 
@@ -626,6 +639,29 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     private void UpdateCandidatePose()
     {
+        if (candidatePoseLocked && adjustingLockedPoseWithHold)
+        {
+            if (hasRelativeAdjustStartPose && TryComputeCandidatePoseFromSource(out Pose currentHandCandidatePose))
+            {
+                Vector3 relativeMove = currentHandCandidatePose.position - handCandidatePoseAtAdjustStart.position;
+                candidatePose = new Pose(
+                    lockedCandidatePoseAtAdjustStart.position + relativeMove,
+                    lockedCandidatePoseAtAdjustStart.rotation);
+                PublishCandidatePose();
+            }
+            return;
+        }
+
+        if (!TryComputeCandidatePoseFromSource(out Pose resolvedCandidatePose))
+            return;
+
+        candidatePose = resolvedCandidatePose;
+        PublishCandidatePose();
+    }
+
+    private bool TryComputeCandidatePoseFromSource(out Pose pose)
+    {
+        pose = default;
         RefreshFallbackCamera();
 
         if (!preferLiveHandPoseForPlacement && placementPointer == null && confirmHand != null)
@@ -633,17 +669,14 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         if (TryGetLiveHandPlacementPose(out Pose handPose))
         {
-            candidatePose = handPose;
-            ApplyCandidateWorldOffset();
-            if (previewObject != null)
-                previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
-            CandidatePoseUpdated?.Invoke(candidatePose);
-            return;
+            pose = handPose;
+            ApplyCandidateWorldOffset(ref pose);
+            return true;
         }
 
         Transform pointer = placementPointer != null ? placementPointer : (fallbackCamera != null ? fallbackCamera.transform : null);
         if (pointer == null)
-            return;
+            return false;
 
         Vector3 position;
         Vector3 forward;
@@ -652,7 +685,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         {
             position = pointer.position + pointer.forward * fallbackDistance;
             forward = pointer.forward;
-            candidatePose = new Pose(position, MakeRotation(forward, Vector3.up));
+            pose = new Pose(position, MakeRotation(forward, Vector3.up));
         }
         else if (sourceMode == PlacementSourceMode.RaycastFromPointer &&
             Physics.Raycast(pointer.position, pointer.forward, out RaycastHit hit, raycastMaxDistance, raycastMask, QueryTriggerInteraction.Ignore))
@@ -661,31 +694,36 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             forward = Vector3.ProjectOnPlane(pointer.forward, hit.normal);
             if (forward.sqrMagnitude < 1e-6f)
                 forward = Vector3.ProjectOnPlane(pointer.up, hit.normal);
-            candidatePose = new Pose(position, MakeRotation(forward, hit.normal));
+            pose = new Pose(position, MakeRotation(forward, hit.normal));
         }
         else if (sourceMode == PlacementSourceMode.CameraForwardFallback)
         {
             position = pointer.position + pointer.forward * fallbackDistance;
             forward = pointer.forward;
-            candidatePose = new Pose(position, MakeRotation(forward, Vector3.up));
+            pose = new Pose(position, MakeRotation(forward, Vector3.up));
         }
         else
         {
             bool raycastMissed = sourceMode == PlacementSourceMode.RaycastFromPointer;
             position = raycastMissed ? pointer.position + pointer.forward * fallbackDistance : pointer.position;
             forward = pointer.forward;
-            candidatePose = new Pose(position, MakeRotation(forward, Vector3.up));
+            pose = new Pose(position, MakeRotation(forward, Vector3.up));
         }
 
-        ApplyCandidateWorldOffset();
+        ApplyCandidateWorldOffset(ref pose);
+        return true;
+    }
+
+    private void PublishCandidatePose()
+    {
         if (previewObject != null)
             previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
         CandidatePoseUpdated?.Invoke(candidatePose);
     }
 
-    private void ApplyCandidateWorldOffset()
+    private void ApplyCandidateWorldOffset(ref Pose pose)
     {
-        candidatePose.position += anchorPlacementWorldOffset;
+        pose.position += anchorPlacementWorldOffset;
     }
 
     private void RefreshFallbackCamera()
