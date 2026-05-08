@@ -111,6 +111,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public event Action PlacementStarted;
     public event Action PlacementCanceled;
     public event Action<Pose> CandidatePoseUpdated;
+    public event Action<bool, bool> CandidatePoseLockStateChanged;
     public event Action CandidatePoseConfirmRequested;
     public event Action<ARAnchor> AnchorCreated;
     public event Action<Transform> AnchorTransformCreated;
@@ -250,8 +251,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         RefreshFallbackCamera();
         IsPlacementMode = true;
         wasPinching = false;
-        candidatePoseLocked = false;
-        adjustingLockedPoseWithHold = false;
+        SetCandidatePoseLockState(false, false);
         pinchStartTime = 0f;
         lastTapPinchReleaseTime = -999f;
         UpdateCandidatePose();
@@ -267,8 +267,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             return;
 
         IsPlacementMode = false;
-        candidatePoseLocked = false;
-        adjustingLockedPoseWithHold = false;
+        SetCandidatePoseLockState(false, false);
         SetPreviewActive(false);
         SetStatusMessage("Anchor placement canceled");
         PlacementCanceled?.Invoke();
@@ -283,8 +282,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         }
 
         IsPlacementMode = false;
-        candidatePoseLocked = false;
-        adjustingLockedPoseWithHold = false;
+        SetCandidatePoseLockState(false, false);
         SetPreviewActive(false);
         SetStatusMessage("Creating Spatial Anchor...");
         isCreatingAnchor = true;
@@ -540,13 +538,13 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (pinching && !wasPinching)
         {
             pinchStartTime = now;
-            adjustingLockedPoseWithHold = false;
+            SetCandidatePoseLockState(candidatePoseLocked, false);
         }
 
         if (pinching && candidatePoseLocked && !adjustingLockedPoseWithHold &&
             now - pinchStartTime >= Mathf.Max(0.01f, holdToFineAdjustDelaySec))
         {
-            adjustingLockedPoseWithHold = true;
+            SetCandidatePoseLockState(true, true);
             lastTapPinchReleaseTime = -999f;
             SetStatusMessage("Fine-adjusting locked anchor pose");
         }
@@ -555,17 +553,16 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         {
             float pinchDuration = now - pinchStartTime;
             bool wasFineAdjusting = adjustingLockedPoseWithHold;
-            adjustingLockedPoseWithHold = false;
 
             if (wasFineAdjusting)
             {
-                candidatePoseLocked = true;
+                SetCandidatePoseLockState(true, false);
                 lastTapPinchReleaseTime = -999f;
                 SetStatusMessage("Anchor pose locked");
             }
             else if (!candidatePoseLocked)
             {
-                candidatePoseLocked = true;
+                SetCandidatePoseLockState(true, false);
                 lastTapPinchReleaseTime = now;
                 SetStatusMessage("Anchor pose locked\nDouble pinch to confirm");
             }
@@ -593,6 +590,17 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             CandidatePoseConfirmRequested.Invoke();
         else
             ConfirmPlacement();
+    }
+
+    private void SetCandidatePoseLockState(bool locked, bool adjusting)
+    {
+        adjusting = locked && adjusting;
+        if (candidatePoseLocked == locked && adjustingLockedPoseWithHold == adjusting)
+            return;
+
+        candidatePoseLocked = locked;
+        adjustingLockedPoseWithHold = adjusting;
+        CandidatePoseLockStateChanged?.Invoke(candidatePoseLocked, adjustingLockedPoseWithHold);
     }
 
     private void TryAutoAssignHand()

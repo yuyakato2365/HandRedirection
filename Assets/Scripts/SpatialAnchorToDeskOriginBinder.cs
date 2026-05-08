@@ -530,6 +530,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
 
         anchorPlacer.SavedAnchorRefreshed += OnSavedAnchorRefreshed;
+        anchorPlacer.CandidatePoseLockStateChanged += OnCandidatePoseLockStateChanged;
         subscribedToAnchorRefresh = true;
     }
 
@@ -539,8 +540,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
 
         if (anchorPlacer != null)
+        {
             anchorPlacer.SavedAnchorRefreshed -= OnSavedAnchorRefreshed;
+            anchorPlacer.CandidatePoseLockStateChanged -= OnCandidatePoseLockStateChanged;
+        }
         subscribedToAnchorRefresh = false;
+    }
+
+    private void OnCandidatePoseLockStateChanged(bool locked, bool adjusting)
+    {
+        UpdateDeskTransparencyForPlacementState();
     }
 
     private void OnSavedAnchorRefreshed(Transform anchor)
@@ -775,6 +784,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         wasLeftRotationPinching = leftPinching;
         wasLeftFineRotationPinching = leftFinePinching;
+
+        if (previewDeskDuringAnchorPlacement && anchorPlacer != null && anchorPlacer.IsPlacementMode)
+        {
+            wasRightConfirmPinching = false;
+            waitingForRightConfirmRelease = false;
+            return;
+        }
 
         bool rightPinching = IsRightConfirmPinching();
         if (rightPinching != wasRightConfirmPinching)
