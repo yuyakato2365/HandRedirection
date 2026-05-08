@@ -61,6 +61,9 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     public void SetMode(RedirectionMode mode)
     {
         CurrentMode = mode;
+        if (mode == RedirectionMode.SpatialAnchor && placer != null && placer.IsPlacementMode && deskBinder != null)
+            deskBinder.BeginPlacementPreviewAlignment();
+
         bool spatialMode = mode == RedirectionMode.SpatialAnchor;
         bool placementActive = placer != null && (placer.IsPlacementMode || placer.IsCreatingAnchor);
         bool anchorReady = HasUsableSpatialAnchor();
@@ -183,12 +186,18 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
     private void OnPlacementStarted()
     {
+        if (deskBinder != null)
+            deskBinder.BeginPlacementPreviewAlignment();
+
         if (IsSpatialAnchorMode)
             SetMode(RedirectionMode.SpatialAnchor);
     }
 
     private void OnPlacementCanceled()
     {
+        if (deskBinder != null)
+            deskBinder.CancelPlacementPreviewAlignment();
+
         if (IsSpatialAnchorMode && returnToOriginalWhenPlacementCanceledWithoutAnchor && !HasUsableSpatialAnchor())
         {
             UseOriginalMode();
@@ -209,7 +218,16 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
             }
             else
             {
-                deskBinder.BeginManualRotationAlignment();
+                if (deskBinder.IsAlignmentConfirmed)
+                {
+                    deskBinder.CaptureCurrentDeskAsOffset();
+                    deskBinder.SaveCurrentOffsetToPrefs();
+                    deskBinder.ApplySavedOffsetAsConfirmed();
+                }
+                else
+                {
+                    deskBinder.BeginManualRotationAlignment();
+                }
             }
         }
 

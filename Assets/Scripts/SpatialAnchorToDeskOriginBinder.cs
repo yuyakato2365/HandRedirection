@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 {
@@ -71,6 +72,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public float anchorPoseOutlierRotationThresholdDegrees = 4f;
     public bool applyOnStart = true;
 
+    [Header("Placement Preview")]
+    [Tooltip("While anchor placement is active, drive DeskOrigin from the moving candidate anchor pose before the persistent anchor is created.")]
+    public bool previewDeskDuringAnchorPlacement = true;
+    [Tooltip("Fade the desk visuals during anchor/desk adjustment so it is clear the pose is temporary.")]
+    public bool makeDeskTransparentWhileAdjusting = true;
+    [Range(0.05f, 1f)] public float adjustingDeskAlpha = 0.35f;
+    [Tooltip("Optional root for the desk visuals to fade. If unset, a DeskVisualFollower using deskOrigin is preferred, then deskOrigin itself.")]
+    public Transform transparentDeskRoot;
+
     [Header("Debug")]
     public bool logHandAlignmentDebug = true;
     public bool writeHandAlignmentLogFile = true;
@@ -109,12 +119,35 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private Vector3 latchedAnchorPosition;
     private Quaternion latchedAnchorRotation = Quaternion.identity;
     private readonly Queue<AnchorPoseSample> anchorPoseSamples = new Queue<AnchorPoseSample>();
+    private bool usingPlacementCandidateAnchor;
+    private readonly List<MaterialAlphaState> transparentMaterialStates = new List<MaterialAlphaState>();
+    private bool deskTransparencyApplied;
 
     private struct AnchorPoseSample
     {
         public float time;
         public Vector3 position;
         public Quaternion rotation;
+    }
+
+    private struct MaterialAlphaState
+    {
+        public Material material;
+        public bool hasColor;
+        public Color color;
+        public bool hasBaseColor;
+        public Color baseColor;
+        public bool hasMode;
+        public float mode;
+        public bool hasSurface;
+        public float surface;
+        public bool hasSrcBlend;
+        public float srcBlend;
+        public bool hasDstBlend;
+        public float dstBlend;
+        public bool hasZWrite;
+        public float zWrite;
+        public int renderQueue;
     }
 
     private void Awake()
@@ -145,6 +178,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private void OnDisable()
     {
         UnsubscribeAnchorRefresh();
+        SetDeskTransparency(false);
     }
 
     private void LateUpdate()
@@ -169,19 +203,18 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         AutoAssignTargets();
 
-        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
-        if (anchor == null)
+        if (!TryGetAnchorPoseForDesk(out Vector3 anchorPosition, out Quaternion anchorRotation))
         {
             LogAlignmentEvent("BeginManualRotationAlignment ignored: anchor is null");
             return;
         }
 
-        Vector3 targetPos = anchor.TransformPoint(localPositionOffset);
-        Quaternion targetRot = ResolveTargetRotation(anchor);
-        if (TryGetLatchedAnchorPose(out Vector3 anchorPosition, out Quaternion anchorRotation))
+        Vector3 targetPos = anchorPosition + (anchorRotation * localPositionOffset);
+        Quaternion targetRot = ResolveTargetRotation(anchorRotation);
+        if (TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
         {
-            targetPos = anchorPosition + (anchorRotation * localPositionOffset);
-            targetRot = ResolveTargetRotation(anchorRotation);
+            targetPos = latchedPosition + (latchedRotation * localPositionOffset);
+            targetRot = ResolveTargetRotation(latchedRotation);
         }
 
         ApplyPose(deskOrigin, targetPos, targetRot);
@@ -193,13 +226,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         AutoAssignTargets();
 
-        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
-        if (anchor == null)
+        if (!TryGetAnchorPoseForDesk(out Vector3 anchorPosition, out Quaternion anchorRotation))
             return;
 
         initialAlignmentRotation = useAnchorRotationAsInitialRotation
-            ? anchor.rotation * Quaternion.Euler(localEulerOffset)
-            : GetCurrentTargetRotation(anchor.rotation * Quaternion.Euler(localEulerOffset));
+            ? anchorRotation * Quaternion.Euler(localEulerOffset)
+            : GetCurrentTargetRotation(anchorRotation * Quaternion.Euler(localEulerOffset));
 
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
@@ -211,6 +243,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         wasLeftFineRotationPinching = IsLeftFineRotationPinching();
         wasRightConfirmPinching = IsRightConfirmPinching();
         waitingForRightConfirmRelease = requireRightPinchReleaseBeforeConfirm;
+        SetDeskTransparency(true);
         ApplyNow();
         LogAlignmentEvent(
             $"BeginManualRotationAlignment initial={FormatRotation(initialAlignmentRotation)} " +
@@ -266,6 +299,25 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         AlignmentChanged?.Invoke();
     }
 
+    public void BeginPlacementPreviewAlignment()
+    {
+        if (!previewDeskDuringAnchorPlacement)
+            return;
+        if (usingPlacementCandidateAnchor && HasAlignmentState && !IsAlignmentConfirmed)
+            return;
+
+        usingPlacementCandidateAnchor = true;
+        BeginManualRotationAlignment();
+    }
+
+    public void CancelPlacementPreviewAlignment()
+    {
+        if (!usingPlacementCandidateAnchor && !IsAdjustingAlignment)
+            return;
+
+        ClearAlignmentState();
+    }
+
     [ContextMenu("Anchor Binder/Confirm Manual Rotation Alignment")]
     public void ConfirmManualRotationAlignment()
     {
@@ -277,13 +329,21 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         ApplyNow();
         CaptureCurrentDeskAsOffset();
         SaveCurrentOffsetToPrefs();
-        CaptureLatchedAnchorPose(anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null, "ConfirmManualRotationAlignment");
+        if (TryGetAnchorPoseForDesk(out Vector3 confirmedAnchorPosition, out Quaternion confirmedAnchorRotation))
+            CaptureLatchedAnchorPose(confirmedAnchorPosition, confirmedAnchorRotation, "ConfirmManualRotationAlignment");
+        else
+            CaptureLatchedAnchorPose(anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null, "ConfirmManualRotationAlignment");
         LogAnchorDeskDiagnostic("ConfirmManualRotationAlignment saved", anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null);
         initialAlignmentRotation = GetCurrentTargetRotation(Quaternion.identity);
         yawAdjustmentDegrees = 0f;
         handRotationAdjustment = Quaternion.identity;
+        usingPlacementCandidateAnchor = false;
+        SetDeskTransparency(false);
         LogAlignmentEvent($"ConfirmManualRotationAlignment finalDesk={FormatTransform(deskOrigin)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset} handAdjustment={FormatRotation(handRotationAdjustment)} yaw={yawAdjustmentDegrees:0.###}");
         AlignmentConfirmed?.Invoke();
+
+        if (anchorPlacer != null && anchorPlacer.IsPlacementMode)
+            anchorPlacer.ConfirmPlacement();
     }
 
     public void ClearAlignmentState()
@@ -298,6 +358,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         wasLeftFineRotationPinching = false;
         wasRightConfirmPinching = false;
         waitingForRightConfirmRelease = false;
+        usingPlacementCandidateAnchor = false;
+        SetDeskTransparency(false);
         LogAlignmentEvent("ClearAlignmentState");
         AlignmentCleared?.Invoke();
     }
@@ -305,14 +367,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [ContextMenu("Anchor Binder/Capture Current Desk As Offset")]
     public void CaptureCurrentDeskAsOffset()
     {
-        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
         Transform target = deskOrigin != null ? deskOrigin : trackerDeskTransform;
-        if (anchor == null || target == null)
+        if (!TryGetAnchorPoseForDesk(out Vector3 anchorPosition, out Quaternion anchorRotation) || target == null)
             return;
 
-        localPositionOffset = Quaternion.Inverse(anchor.rotation) * (target.position - anchor.position);
-        localEulerOffset = (Quaternion.Inverse(anchor.rotation) * target.rotation).eulerAngles;
-        LogAlignmentEvent($"CaptureCurrentDeskAsOffset anchor={FormatTransform(anchor)} target={FormatTransform(target)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
+        localPositionOffset = Quaternion.Inverse(anchorRotation) * (target.position - anchorPosition);
+        localEulerOffset = (Quaternion.Inverse(anchorRotation) * target.rotation).eulerAngles;
+        LogAlignmentEvent($"CaptureCurrentDeskAsOffset anchorPos={anchorPosition} anchorRot={FormatRotation(anchorRotation)} target={FormatTransform(target)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
     }
 
     public bool LoadSavedOffsetFromPrefs()
@@ -413,7 +474,37 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private void EnsureAlignmentStarted()
     {
         if (!HasAlignmentState)
-            BeginManualRotationAlignment();
+        {
+            if (previewDeskDuringAnchorPlacement && anchorPlacer != null && anchorPlacer.IsPlacementMode)
+                BeginPlacementPreviewAlignment();
+            else
+                BeginManualRotationAlignment();
+        }
+    }
+
+    private bool TryGetAnchorPoseForDesk(out Vector3 position, out Quaternion rotation)
+    {
+        if (previewDeskDuringAnchorPlacement &&
+            anchorPlacer != null &&
+            (usingPlacementCandidateAnchor || anchorPlacer.IsPlacementMode || (HasAlignmentState && !IsAlignmentConfirmed && anchorPlacer.IsCreatingAnchor && anchorPlacer.CurrentAnchorTransform == null)))
+        {
+            Pose candidatePose = anchorPlacer.CandidatePose;
+            position = candidatePose.position;
+            rotation = candidatePose.rotation;
+            return true;
+        }
+
+        Transform anchor = anchorPlacer != null ? anchorPlacer.CurrentAnchorTransform : null;
+        if (anchor != null)
+        {
+            position = anchor.position;
+            rotation = anchor.rotation;
+            return true;
+        }
+
+        position = Vector3.zero;
+        rotation = Quaternion.identity;
+        return false;
     }
 
     private bool ShouldApplyAnchorPoseThisFrame()
@@ -753,6 +844,184 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         position = latchedAnchorPosition;
         rotation = latchedAnchorRotation;
         return useLatchedAnchorPoseAfterConfirmation && IsAlignmentConfirmed && hasLatchedConfirmedAnchorPose;
+    }
+
+    private void SetDeskTransparency(bool transparent)
+    {
+        if (!makeDeskTransparentWhileAdjusting)
+        {
+            if (!transparent)
+                RestoreDeskTransparency();
+            return;
+        }
+
+        if (transparent)
+            ApplyDeskTransparency();
+        else
+            RestoreDeskTransparency();
+    }
+
+    private void ApplyDeskTransparency()
+    {
+        if (deskTransparencyApplied)
+            return;
+
+        Transform root = ResolveTransparentDeskRoot();
+        if (root == null)
+            return;
+
+        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+        if (renderers == null || renderers.Length == 0)
+            return;
+
+        transparentMaterialStates.Clear();
+        float alpha = Mathf.Clamp01(adjustingDeskAlpha);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null)
+                continue;
+
+            Material[] materials = renderer.materials;
+            for (int m = 0; m < materials.Length; m++)
+            {
+                Material material = materials[m];
+                if (material == null || ContainsMaterialState(material))
+                    continue;
+
+                MaterialAlphaState state = CaptureMaterialState(material);
+                transparentMaterialStates.Add(state);
+                ForceMaterialTransparent(material, alpha);
+            }
+        }
+
+        deskTransparencyApplied = transparentMaterialStates.Count > 0;
+    }
+
+    private void RestoreDeskTransparency()
+    {
+        if (!deskTransparencyApplied && transparentMaterialStates.Count == 0)
+            return;
+
+        for (int i = 0; i < transparentMaterialStates.Count; i++)
+            RestoreMaterialState(transparentMaterialStates[i]);
+
+        transparentMaterialStates.Clear();
+        deskTransparencyApplied = false;
+    }
+
+    private Transform ResolveTransparentDeskRoot()
+    {
+        if (transparentDeskRoot != null)
+            return transparentDeskRoot;
+
+        DeskVisualFollower[] followers = FindObjectsByType<DeskVisualFollower>(FindObjectsSortMode.None);
+        if (followers != null)
+        {
+            for (int i = 0; i < followers.Length; i++)
+            {
+                if (followers[i] != null && followers[i].deskOrigin == deskOrigin)
+                    return followers[i].transform;
+            }
+        }
+
+        return deskOrigin;
+    }
+
+    private bool ContainsMaterialState(Material material)
+    {
+        for (int i = 0; i < transparentMaterialStates.Count; i++)
+        {
+            if (transparentMaterialStates[i].material == material)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static MaterialAlphaState CaptureMaterialState(Material material)
+    {
+        return new MaterialAlphaState
+        {
+            material = material,
+            hasColor = material.HasProperty("_Color"),
+            color = material.HasProperty("_Color") ? material.GetColor("_Color") : Color.white,
+            hasBaseColor = material.HasProperty("_BaseColor"),
+            baseColor = material.HasProperty("_BaseColor") ? material.GetColor("_BaseColor") : Color.white,
+            hasMode = material.HasProperty("_Mode"),
+            mode = material.HasProperty("_Mode") ? material.GetFloat("_Mode") : 0f,
+            hasSurface = material.HasProperty("_Surface"),
+            surface = material.HasProperty("_Surface") ? material.GetFloat("_Surface") : 0f,
+            hasSrcBlend = material.HasProperty("_SrcBlend"),
+            srcBlend = material.HasProperty("_SrcBlend") ? material.GetFloat("_SrcBlend") : 0f,
+            hasDstBlend = material.HasProperty("_DstBlend"),
+            dstBlend = material.HasProperty("_DstBlend") ? material.GetFloat("_DstBlend") : 0f,
+            hasZWrite = material.HasProperty("_ZWrite"),
+            zWrite = material.HasProperty("_ZWrite") ? material.GetFloat("_ZWrite") : 1f,
+            renderQueue = material.renderQueue
+        };
+    }
+
+    private static void ForceMaterialTransparent(Material material, float alpha)
+    {
+        if (material.HasProperty("_Color"))
+        {
+            Color color = material.GetColor("_Color");
+            color.a = alpha;
+            material.SetColor("_Color", color);
+        }
+
+        if (material.HasProperty("_BaseColor"))
+        {
+            Color color = material.GetColor("_BaseColor");
+            color.a = alpha;
+            material.SetColor("_BaseColor", color);
+        }
+
+        if (material.HasProperty("_Mode"))
+            material.SetFloat("_Mode", 3f);
+        if (material.HasProperty("_Surface"))
+            material.SetFloat("_Surface", 1f);
+        if (material.HasProperty("_SrcBlend"))
+            material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        if (material.HasProperty("_DstBlend"))
+            material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        if (material.HasProperty("_ZWrite"))
+            material.SetFloat("_ZWrite", 0f);
+
+        material.EnableKeyword("_ALPHABLEND_ON");
+        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.renderQueue = (int)RenderQueue.Transparent;
+    }
+
+    private static void RestoreMaterialState(MaterialAlphaState state)
+    {
+        Material material = state.material;
+        if (material == null)
+            return;
+
+        if (state.hasColor)
+            material.SetColor("_Color", state.color);
+        if (state.hasBaseColor)
+            material.SetColor("_BaseColor", state.baseColor);
+        if (state.hasMode)
+            material.SetFloat("_Mode", state.mode);
+        if (state.hasSurface)
+            material.SetFloat("_Surface", state.surface);
+        if (state.hasSrcBlend)
+            material.SetFloat("_SrcBlend", state.srcBlend);
+        if (state.hasDstBlend)
+            material.SetFloat("_DstBlend", state.dstBlend);
+        if (state.hasZWrite)
+            material.SetFloat("_ZWrite", state.zWrite);
+
+        if ((!state.hasMode || state.mode < 2.5f) && (!state.hasSurface || state.surface < 0.5f))
+        {
+            material.DisableKeyword("_ALPHABLEND_ON");
+            material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        }
+
+        material.renderQueue = state.renderQueue;
     }
 
     private Quaternion GetCurrentTargetRotation(Quaternion fallbackRotation)

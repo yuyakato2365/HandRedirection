@@ -92,6 +92,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public Transform CurrentAnchorTransform => CurrentAnchor != null
         ? CurrentAnchor.transform
         : (currentOvrSpatialAnchor != null ? currentOvrSpatialAnchor.transform : sessionAnchorTransform);
+    public Pose CandidatePose => candidatePose;
     public bool IsPlacementMode { get; private set; }
     public bool IsCreatingAnchor => isCreatingAnchor;
     public bool HasAnchor => CurrentAnchor != null || currentOvrSpatialAnchor != null || sessionAnchorTransform != null;
@@ -100,6 +101,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     public event Action PlacementStarted;
     public event Action PlacementCanceled;
+    public event Action<Pose> CandidatePoseUpdated;
     public event Action<ARAnchor> AnchorCreated;
     public event Action<Transform> AnchorTransformCreated;
     public event Action<Transform> SavedAnchorRefreshed;
@@ -525,6 +527,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             ApplyCandidateWorldOffset();
             if (previewObject != null)
                 previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+            CandidatePoseUpdated?.Invoke(candidatePose);
             return;
         }
 
@@ -567,6 +570,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         ApplyCandidateWorldOffset();
         if (previewObject != null)
             previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+        CandidatePoseUpdated?.Invoke(candidatePose);
     }
 
     private void ApplyCandidateWorldOffset()

@@ -199,7 +199,13 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                 placer.CancelPlacement();
                 break;
             case "CONFIRM_ANCHOR_PLACEMENT":
-                placer.ConfirmPlacement();
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder placementConfirmBinder) &&
+                    placementConfirmBinder.IsAdjustingAlignment)
+                {
+                    placementConfirmBinder.ConfirmManualRotationAlignment();
+                }
+                if (placer.IsPlacementMode)
+                    placer.ConfirmPlacement();
                 break;
             case "CLEAR_ANCHOR":
                 placer.ClearAnchor();
