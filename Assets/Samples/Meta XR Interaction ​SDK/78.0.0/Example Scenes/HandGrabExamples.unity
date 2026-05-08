@@ -1364,8 +1364,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ef8b94671de7e6c46b8225bb799c0899, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   kind: 1
   faceAxis: 0
   faceSign: 1
@@ -2051,8 +2051,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ef8b94671de7e6c46b8225bb799c0899, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   kind: 0
   faceAxis: 2
   faceSign: 1
@@ -3987,6 +3987,7 @@ MonoBehaviour:
   placer: {fileID: 278646990}
   deskBinder: {fileID: 278646988}
   featureToggle: {fileID: 278646987}
+  experienceResetter: {fileID: 0}
   logCommands: 0
 --- !u!114 &278646990
 MonoBehaviour:
@@ -4077,8 +4078,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9a6c7b5e2f2b4b5489c0e2bb7d31c5e0, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   hmdTransform: {fileID: 279069016}
   rigRoot: {fileID: 279069017}
   deskOrigin: {fileID: 1332633470}
@@ -8003,6 +8004,9 @@ MonoBehaviour:
   hoverRadius: 0.05
   minScale: {x: 0.05, y: 0.05, z: 0.05}
   maxScale: {x: 2, y: 2, z: 2}
+  playScaleAudioFeedback: 1
+  scaleAudioIntervalSec: 0.25
+  scaleAudioDeltaThreshold: 0.01
   allHandles:
   - {fileID: 467660082}
   - {fileID: 1459895317}
@@ -15423,6 +15427,8 @@ MonoBehaviour:
   defaultMaterial: {fileID: 2100000, guid: b96d3bf42d5632748b8789743a60806b, type: 2}
   nearMaterial: {fileID: 2100000, guid: 040a88f63fcc87144b747552c51cfa03, type: 2}
   successMaterial: {fileID: 2100000, guid: c18861a732b3fcc4e871ba1f4c3f1650, type: 2}
+  playAudioFeedback: 1
+  stateAudioCooldownSeconds: 0.35
   currentTargetPosition: {x: 0, y: 0, z: 0}
   currentGhostPosition: {x: 0, y: 0, z: 0}
   currentTargetScale: {x: 0, y: 0, z: 0}
@@ -19608,6 +19614,7 @@ MonoBehaviour:
   placer: {fileID: 1097426981}
   deskBinder: {fileID: 0}
   featureToggle: {fileID: 0}
+  experienceResetter: {fileID: 0}
   logCommands: 1
 --- !u!114 &1097426981
 MonoBehaviour:
@@ -22515,6 +22522,9 @@ MonoBehaviour:
   hoverRadius: 0.05
   minScale: {x: 0.05, y: 0.05, z: 0.05}
   maxScale: {x: 2, y: 2, z: 2}
+  playScaleAudioFeedback: 1
+  scaleAudioIntervalSec: 0.25
+  scaleAudioDeltaThreshold: 0.01
   allHandles:
   - {fileID: 2051779919}
   - {fileID: 895339100}
@@ -27322,7 +27332,7 @@ MonoBehaviour:
   targets:
   - objectId: 1
     objTransform: {fileID: 1923555133}
-    centerOffsetInTracker: {x: 0, y: 0, z: -0.13}
+    centerOffsetInTracker: {x: 0, y: 0, z: -0.08}
     centerEulerOffset: {x: 0, y: 0, z: 0}
   - objectId: 3
     objTransform: {fileID: 1381132989}
@@ -32319,6 +32329,8 @@ MonoBehaviour:
   defaultMaterial: {fileID: 2100000, guid: b96d3bf42d5632748b8789743a60806b, type: 2}
   nearMaterial: {fileID: 2100000, guid: 040a88f63fcc87144b747552c51cfa03, type: 2}
   successMaterial: {fileID: 2100000, guid: c18861a732b3fcc4e871ba1f4c3f1650, type: 2}
+  playAudioFeedback: 1
+  stateAudioCooldownSeconds: 0.35
   currentTargetPosition: {x: 0, y: 0, z: 0}
   currentGhostPosition: {x: 0, y: 0, z: 0}
   currentTargetScale: {x: 0, y: 0, z: 0}
@@ -35136,8 +35148,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4a7aef05b1c4ac2499b08e5aec05ee3e, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1001 &1908991219
 PrefabInstance:
   m_ObjectHideFlags: 0
