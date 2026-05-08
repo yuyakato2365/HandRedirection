@@ -79,6 +79,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public bool preferLiveHandPoseForPlacement = true;
     public OvrHandPlacementJoint placementHandJoint = OvrHandPlacementJoint.PointerPose;
     public Vector3 handPlacementLocalOffset = Vector3.zero;
+    [Tooltip("World-space offset applied to the final anchor placement pose. Use negative Y to place the anchor below the hand marker.")]
+    public Vector3 anchorPlacementWorldOffset = new Vector3(0f, -0.08f, 0f);
 
     [Header("Editor Debug Input")]
     public bool enableKeyboardInput = true;
@@ -520,6 +522,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (TryGetLiveHandPlacementPose(out Pose handPose))
         {
             candidatePose = handPose;
+            ApplyCandidateWorldOffset();
             if (previewObject != null)
                 previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
             return;
@@ -561,8 +564,14 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             candidatePose = new Pose(position, MakeRotation(forward, Vector3.up));
         }
 
+        ApplyCandidateWorldOffset();
         if (previewObject != null)
             previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+    }
+
+    private void ApplyCandidateWorldOffset()
+    {
+        candidatePose.position += anchorPlacementWorldOffset;
     }
 
     private void RefreshFallbackCamera()
