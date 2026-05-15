@@ -33,6 +33,10 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
 
     [Header("Desk / Origin")]
     public Transform deskOrigin;
+    [Tooltip("Optional separate origin for redirection mapping. If unset, deskOrigin is used.")]
+    public Transform redirectionOrigin;
+    public bool useRedirectionOriginWhenAvailable = false;
+    public bool suppressRedirection;
 
     [Header("Desk Mapping")]
     public float deskWidthScale = 1.0f;
@@ -124,6 +128,11 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     void LateUpdate()
     {
         if (!UseDeskMapping() && cameraCenter == null) return;
+        if (suppressRedirection)
+        {
+            ResetRedirectorsToOriginalHands();
+            return;
+        }
 
         if (enableRemoteFarRadius && knobReceiver != null)
         {
@@ -142,7 +151,15 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
             UpdateHand(rightHandOriginal, rightHandRedirector, rightIndexTipPoint, ref _lastSelectedIndexRight);
     }
 
-    bool UseDeskMapping() => deskOrigin != null;
+    bool UseDeskMapping() => GetWarpOrigin() != null;
+
+    Transform GetWarpOrigin()
+    {
+        if (useRedirectionOriginWhenAvailable && redirectionOrigin != null)
+            return redirectionOrigin;
+
+        return deskOrigin;
+    }
 
     List<WarpObjectEntry> EnumerateActiveEntries()
     {
@@ -314,20 +331,21 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
 
     Vector3 WorldToDeskLocal(Vector3 world)
     {
+        Transform origin = GetWarpOrigin();
         Vector3 deskLocal;
 
-        if (deskOrigin == null)
+        if (origin == null)
             deskLocal = world;
         else if (cameraCenter != null)
         {
-            Vector3 headInDesk = deskOrigin.InverseTransformPoint(cameraCenter.position);
+            Vector3 headInDesk = origin.InverseTransformPoint(cameraCenter.position);
             Vector3 handFromHeadWorld = world - cameraCenter.position;
-            Vector3 handFromHeadDesk = Quaternion.Inverse(deskOrigin.rotation) * handFromHeadWorld;
+            Vector3 handFromHeadDesk = Quaternion.Inverse(origin.rotation) * handFromHeadWorld;
             deskLocal = headInDesk + handFromHeadDesk;
         }
         else
         {
-            deskLocal = deskOrigin.InverseTransformPoint(world);
+            deskLocal = origin.InverseTransformPoint(world);
         }
 
         return DeskLocalToWarpLocal(deskLocal);
@@ -335,10 +353,11 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
 
     Vector3 DeskLocalToWorld(Vector3 local)
     {
+        Transform origin = GetWarpOrigin();
         Vector3 deskLocal = WarpLocalToDeskLocal(local);
-        if (deskOrigin == null)
+        if (origin == null)
             return deskLocal;
-        return deskOrigin.TransformPoint(deskLocal);
+        return origin.TransformPoint(deskLocal);
     }
 
     Vector3 DeskLocalToWarpLocal(Vector3 deskLocal)

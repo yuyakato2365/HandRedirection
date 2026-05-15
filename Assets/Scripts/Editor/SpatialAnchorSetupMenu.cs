@@ -39,6 +39,7 @@ public static class SpatialAnchorSetupMenu
 
         Undo.RecordObject(placer, "Configure Manual Spatial Anchor Placer");
         placer.anchorManager = anchorManager;
+        placer.useOvrSpatialAnchorPersistence = true;
         placer.sourceMode = ManualSpatialAnchorPlacer.PlacementSourceMode.OvrHandJoint;
         placer.preferLiveHandPoseForPlacement = true;
         placer.placementHandJoint = ManualSpatialAnchorPlacer.OvrHandPlacementJoint.PointerPose;
@@ -47,6 +48,16 @@ public static class SpatialAnchorSetupMenu
         placer.autoFindConfirmHand = true;
         placer.createDefaultVisuals = true;
         placer.createDefaultStatusText = true;
+        placer.loadSavedAnchorOnStart = false;
+        placer.reloadSavedAnchorOnHmdMounted = true;
+        placer.reapplyCurrentAnchorOnHmdMounted = false;
+        placer.reapplyDeskOriginAfterHmdMountedAnchorReload = false;
+        placer.hmdMountedAnchorReloadDelaySec = 1f;
+        placer.hmdMountedAnchorReloadCooldownSec = 0f;
+        placer.reapplyCurrentAnchorImmediatelyOnHmdMounted = false;
+        placer.hmdMountedAnchorLoadWarmupFrames = 0;
+        placer.skipSavedAnchorReloadOnHmdMountedInEditor = false;
+        placer.allowPcvrSessionAnchorFallback = true;
 
         Undo.RecordObject(receiver, "Configure Spatial Anchor Command Receiver");
         receiver.placer = placer;
@@ -60,6 +71,12 @@ public static class SpatialAnchorSetupMenu
         Undo.RecordObject(binder, "Configure Spatial Anchor Desk Binder");
         binder.anchorPlacer = placer;
         binder.requireManualRotationConfirmation = true;
+        binder.correctHmdRemountByKeepingDeskOriginFixed = false;
+        binder.applySavedRedirectionOriginOnAlignment = false;
+        binder.logHandAlignmentDebug = false;
+        binder.writeHandAlignmentLogFile = false;
+        binder.activePinchLogIntervalSec = 1f;
+        binder.logAnchorDeskDiagnostics = false;
 
         Undo.RecordObject(toggle, "Configure Spatial Anchor Redirection Toggle");
         toggle.placer = placer;

@@ -14,7 +14,7 @@ class AnchorControlWindow:
     def __init__(self, root):
         self.root = root
         self.root.title("Spatial Anchor Calibration Control")
-        self.root.geometry("520x510")
+        self.root.geometry("520x590")
         self.running = True
 
         self.quest_ip = tk.StringVar(value=DEFAULT_QUEST_IP)
@@ -72,8 +72,14 @@ class AnchorControlWindow:
         ttk.Button(button_frame, text="Restore Original Mode", command=lambda: self._send("RESTORE_ORIGINAL_HAND_REDIRECTION")).grid(
             row=4, column=1, sticky="ew", padx=(6, 0), pady=(8, 0)
         )
-        ttk.Button(button_frame, text="Next Participant / Reset Objects", command=lambda: self._send("RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT")).grid(
+        ttk.Button(button_frame, text="Set Redirection Origin", command=lambda: self._send("REARM_RIGHT_PINCH_REDIRECTION_ORIGIN")).grid(
             row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+        )
+        ttk.Button(button_frame, text="Reset Redirection Origin", command=lambda: self._send("RESET_REDIRECTION_ORIGIN_TO_DESK")).grid(
+            row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+        )
+        ttk.Button(button_frame, text="Next Participant / Reset Objects", command=lambda: self._send("RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT")).grid(
+            row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0)
         )
 
         ttk.Label(frame, text="Status").grid(row=3, column=0, columnspan=2, sticky="w", pady=(20, 4))

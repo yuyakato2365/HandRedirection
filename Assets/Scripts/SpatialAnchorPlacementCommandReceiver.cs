@@ -285,6 +285,27 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                     SendStatus("DESK_ALIGNMENT_CONFIRMED");
                 }
                 break;
+            case "SET_REDIRECTION_ORIGIN":
+            case "REARM_REDIRECTION_ORIGIN":
+            case "REARM_RIGHT_PINCH_REDIRECTION_ORIGIN":
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder redirectionOriginBinder))
+                {
+                    redirectionOriginBinder.RearmRightPinchRedirectionOrigin();
+                    if (placer != null)
+                        placer.SetStatusMessage("Right pinch will set redirection origin");
+                    SendStatus("REDIRECTION_ORIGIN_ARMED_RIGHT_PINCH");
+                }
+                break;
+            case "RESET_REDIRECTION_ORIGIN":
+            case "RESET_REDIRECTION_ORIGIN_TO_DESK":
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder resetRedirectionOriginBinder))
+                {
+                    resetRedirectionOriginBinder.ResetRedirectionOriginToDesk();
+                    if (placer != null)
+                        placer.SetStatusMessage("Redirection origin reset to desk origin");
+                    SendStatus("REDIRECTION_ORIGIN_RESET_TO_DESK");
+                }
+                break;
             case "ENABLE_ANCHOR_REDIRECTION":
             case "USE_SPATIAL_ANCHOR_REDIRECTION":
                 if (featureToggle != null)

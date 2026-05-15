@@ -29,6 +29,9 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     public bool clearAnchorWhenReturningToOriginal = false;
     public bool disableHandRedirectionUntilAnchorExists = true;
     public bool returnToOriginalWhenPlacementCanceledWithoutAnchor = true;
+    public bool autoRefreshGoGoHandRedirectionBehaviours = true;
+    [Tooltip("Hand-local Scaniverse passthrough overlay is an always-on visual layer, not part of anchor readiness gating.")]
+    public bool leaveHandLocalScaniverseOcclusionEnabled = true;
 
     public RedirectionMode CurrentMode { get; private set; }
     public bool IsSpatialAnchorMode => CurrentMode == RedirectionMode.SpatialAnchor;
@@ -69,8 +72,9 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         bool anchorReady = HasUsableSpatialAnchor();
         bool suppressRedirectionForPlacement = spatialMode && placementActive;
         bool enableSpatialAnchorDrivenRedirection = spatialMode && anchorReady && !suppressRedirectionForPlacement;
+        bool hasPlacedAnchor = placer != null && placer.HasAnchor && !placer.IsPlacementMode && !placer.IsCreatingAnchor;
         bool enableHandRedirection = !suppressRedirectionForPlacement &&
-                                     (!spatialMode || !disableHandRedirectionUntilAnchorExists || anchorReady);
+                                     (!spatialMode || !disableHandRedirectionUntilAnchorExists || anchorReady || hasPlacedAnchor);
         bool enableDeskBinder = spatialMode && (anchorReady || (deskBinder != null && deskBinder.IsAdjustingAlignment));
 
         // Keep the command receiver alive so the PC window can always switch modes back.
@@ -79,6 +83,10 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         SetBehaviourEnabled(placer, spatialMode);
         SetBehaviourEnabled(deskBinder, enableDeskBinder);
         SetBehaviourListEnabled(spatialAnchorModeBehaviours, enableSpatialAnchorDrivenRedirection);
+        if (!leaveHandLocalScaniverseOcclusionEnabled)
+            SetHandLocalScaniverseOcclusionEnabled(spatialMode && (enableSpatialAnchorDrivenRedirection || (deskBinder != null && deskBinder.IsAdjustingAlignment)));
+        else
+            SetHandLocalScaniverseOcclusionEnabled(true);
         SetOriginalModeBehavioursForMode(spatialMode);
         SetBehaviourListEnabled(handRedirectionBehaviours, enableHandRedirection);
         handRedirectionCurrentlyEnabled = enableHandRedirection;
@@ -122,11 +130,11 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
         if (commandReceiver == null)
             commandReceiver = FindAnyObjectByType<SpatialAnchorPlacementCommandReceiver>();
-        if (handRedirectionBehaviours == null || handRedirectionBehaviours.Length == 0)
+        if (autoRefreshGoGoHandRedirectionBehaviours || handRedirectionBehaviours == null || handRedirectionBehaviours.Length == 0)
         {
-            GoGoInteractionController_NoY3 goGo = FindAnyObjectByType<GoGoInteractionController_NoY3>();
-            if (goGo != null)
-                handRedirectionBehaviours = new MonoBehaviour[] { goGo };
+            GoGoInteractionController_NoY3[] goGoControllers = FindObjectsByType<GoGoInteractionController_NoY3>(FindObjectsSortMode.None);
+            if (goGoControllers != null && goGoControllers.Length > 0)
+                handRedirectionBehaviours = goGoControllers;
         }
 
         trackerCalibrators = FindObjectsByType<TrackerToCubeOffsetCalibrator3>(FindObjectsSortMode.None);
@@ -269,6 +277,8 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
     private void OnDeskAlignmentChanged()
     {
+        ClearAnchorPlacementFaders();
+
         if (placer != null && deskBinder != null && deskBinder.IsAdjustingAlignment)
             placer.SetStatusMessage($"Left pinch rotates desk in 3D\nRight pinch confirms\nYaw offset: {deskBinder.CurrentYawAdjustmentDegrees:0.###} deg");
 
@@ -400,5 +410,31 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     {
         if (behaviour != null)
             behaviour.enabled = enabled;
+    }
+
+    private static void SetHandLocalScaniverseOcclusionEnabled(bool enabled)
+    {
+        HandLocalScaniverseOcclusion[] occlusions = FindObjectsByType<HandLocalScaniverseOcclusion>(FindObjectsSortMode.None);
+        if (occlusions == null)
+            return;
+
+        for (int i = 0; i < occlusions.Length; i++)
+        {
+            if (occlusions[i] != null)
+                occlusions[i].enabled = enabled;
+        }
+    }
+
+    private static void ClearAnchorPlacementFaders()
+    {
+        AnchorPlacementSceneFader[] faders = FindObjectsByType<AnchorPlacementSceneFader>(FindObjectsSortMode.None);
+        if (faders == null)
+            return;
+
+        for (int i = 0; i < faders.Length; i++)
+        {
+            if (faders[i] != null)
+                faders[i].ClearFadeNow();
+        }
     }
 }
