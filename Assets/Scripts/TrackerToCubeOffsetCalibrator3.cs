@@ -36,6 +36,10 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
         [Tooltip("Fixed extra rotation from tracker orientation to object orientation in degrees.")]
         public Vector3 centerEulerOffset = Vector3.zero;
+
+        [Header("DeskOrigin Offset")]
+        [Tooltip("DeskOrigin-local position offset applied only to this object after tracker-specific offsets.")]
+        public Vector3 objectDeskPositionOffset = Vector3.zero;
     }
 
     private struct RelativePose
@@ -97,6 +101,10 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
     [Tooltip("Objects driven by REL0 packets.")]
     public List<TargetEntry> targets = new List<TargetEntry>();
+
+    [Header("DeskOrigin Object Group Offset")]
+    [Tooltip("DeskOrigin-local position offset applied to every target object after tracker-specific offsets. Use this to move the whole object set relative to DeskOrigin axes.")]
+    public Vector3 objectGroupDeskPositionOffset = Vector3.zero;
 
     [Header("Object Smoothing")]
     [Tooltip("0 disables smoothing. Larger values follow object position faster.")]
@@ -260,7 +268,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             Vector3 centerInDeskPos = relPosInDeskOrigin + (relRotInDeskOrigin * target.centerOffsetInTracker);
             Quaternion centerInDeskRot = relRotInDeskOrigin * centerRotOffset;
 
-            Vector3 targetPosW = deskPosW + (deskRotW * centerInDeskPos);
+            Vector3 targetPosW = deskPosW + (deskRotW * (centerInDeskPos + objectGroupDeskPositionOffset + target.objectDeskPositionOffset));
             Quaternion targetRotW = deskRotW * centerInDeskRot;
 
             ApplyPose(target.objTransform, targetPosW, targetRotW, positionLerp, rotationSlerp);

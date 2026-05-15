@@ -503,10 +503,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     public void ApplySavedOffsetAsConfirmed()
     {
-        ApplySavedOffsetAsConfirmed(true);
+        ApplySavedOffsetAsConfirmed(true, true);
     }
 
     private void ApplySavedOffsetAsConfirmed(bool refreshLatchedAnchorPose)
+    {
+        ApplySavedOffsetAsConfirmed(refreshLatchedAnchorPose, true);
+    }
+
+    private void ApplySavedOffsetAsConfirmed(bool refreshLatchedAnchorPose, bool armRedirectionOrigin)
     {
         AutoAssignTargets();
 
@@ -523,7 +528,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         handRotationAdjustment = Quaternion.identity;
         HasAlignmentState = true;
         IsAlignmentConfirmed = true;
-        if (refreshLatchedAnchorPose)
+        if (refreshLatchedAnchorPose && armRedirectionOrigin)
         {
             redirectionOriginSetAfterConfirmation = false;
             waitingForRightRedirectionOriginRelease = enableRightPinchRedirectionOriginAfterConfirmation;
@@ -540,12 +545,17 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (shouldForceRearmRedirectionOrigin)
             SyncRedirectionOriginWithDesk();
         else if (!redirectionOriginSetAfterConfirmation)
-            redirectionOriginSetAfterConfirmation = ApplySavedRedirectionOriginOrSyncToDesk();
+        {
+            if (armRedirectionOrigin)
+                redirectionOriginSetAfterConfirmation = ApplySavedRedirectionOriginOrSyncToDesk();
+            else
+                ApplyRedirectionOriginToControllers();
+        }
         else
             ApplyRedirectionOriginToControllers();
         if (shouldForceRearmRedirectionOrigin)
             redirectionOriginSetAfterConfirmation = false;
-        redirectionOriginPlacementArmed = enableRightPinchRedirectionOriginAfterConfirmation && (!redirectionOriginSetAfterConfirmation || shouldForceRearmRedirectionOrigin);
+        redirectionOriginPlacementArmed = armRedirectionOrigin && enableRightPinchRedirectionOriginAfterConfirmation && (!redirectionOriginSetAfterConfirmation || shouldForceRearmRedirectionOrigin);
         waitingForRightRedirectionOriginRelease = redirectionOriginPlacementArmed && IsRightConfirmPinching();
         redirectionOriginRearmRequested = false;
         ApplyRedirectionSuppressionState();
@@ -673,7 +683,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
         }
 
-        ApplySavedOffsetAsConfirmed();
+        ApplySavedOffsetAsConfirmed(true, false);
         LogAlignmentEvent($"SavedAnchorRefreshed after apply anchor={FormatTransform(anchor)} desk={FormatTransform(deskOrigin)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
     }
 
@@ -727,7 +737,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
         }
 
-        ApplySavedOffsetAsConfirmed(false);
+        ApplySavedOffsetAsConfirmed(false, false);
         LogAnchorDeskDiagnostic("ConfirmedDeskDrift after", anchor);
     }
 
@@ -843,7 +853,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             $"ConfirmedAnchorRelatch detected posDelta={anchorPositionDelta:0.###}m rotDelta={anchorRotationDelta:0.###}deg " +
             $"old={FormatLatchedAnchorPose()} filteredAnchor=pos({filteredPosition.x:0.###},{filteredPosition.y:0.###},{filteredPosition.z:0.###}) rot={FormatRotation(filteredRotation)} live={FormatTransform(anchor)}");
         CaptureLatchedAnchorPose(filteredPosition, filteredRotation, "ConfirmedAnchorRelatchAverage");
-        ApplySavedOffsetAsConfirmed(false);
+        ApplySavedOffsetAsConfirmed(false, false);
         LogAnchorDeskDiagnostic("ConfirmedAnchorRelatch after", anchor);
         return true;
     }
