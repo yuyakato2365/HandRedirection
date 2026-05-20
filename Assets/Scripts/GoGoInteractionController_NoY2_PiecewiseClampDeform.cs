@@ -542,13 +542,12 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
             return;
         }
 
-        Vector3 w = original.position;
         Vector3 t = indexTipPoint.position;
         Quaternion r = original.rotation;
 
-        Vector3 wM = MapPointWorld(w, ref lastSelectedIndex);
         Vector3 tM = MapPointWorld(t, ref lastSelectedIndex);
 
+        Vector3 w = original.position;
         Vector3 vLocal = Quaternion.Inverse(r) * (t - w);
         Vector3 wPlaced = tM - (r * vLocal);
 
