@@ -44,6 +44,10 @@ public class GhostPlacementFeedback : MonoBehaviour
     [SerializeField] private Material nearMaterial;
     [SerializeField] private Material successMaterial;
 
+    [Header("Audio Feedback")]
+    [SerializeField] private bool playAudioFeedback = true;
+    [SerializeField] private float stateAudioCooldownSeconds = 0.35f;
+
     [Header("Debug (Read Only)")]
     [SerializeField] private Vector3 currentTargetPosition;
     [SerializeField] private Vector3 currentGhostPosition;
@@ -63,6 +67,7 @@ public class GhostPlacementFeedback : MonoBehaviour
 
     private bool hasCapturedTargetParentBaseScale = false;
     private bool hasCapturedGhostParentBaseScale = false;
+    private float nextStateAudioTime;
 
     private void Awake()
     {
@@ -175,6 +180,7 @@ public class GhostPlacementFeedback : MonoBehaviour
         {
             CurrentState = newState;
             Apply(CurrentState);
+            PlayStateAudio(CurrentState);
         }
     }
 
@@ -316,6 +322,22 @@ public class GhostPlacementFeedback : MonoBehaviour
             Renderer r = targetRenderers[i];
             if (r == null) continue;
             r.sharedMaterial = m;
+        }
+    }
+    private void PlayStateAudio(MatchState state)
+    {
+        if (!playAudioFeedback || Time.realtimeSinceStartup < nextStateAudioTime)
+            return;
+
+        if (state == MatchState.Near)
+        {
+            ExhibitionAudioFeedback.PlayCue(ExhibitionAudioFeedback.Cue.PlacementNear);
+            nextStateAudioTime = Time.realtimeSinceStartup + stateAudioCooldownSeconds;
+        }
+        else if (state == MatchState.Success)
+        {
+            ExhibitionAudioFeedback.PlayCue(ExhibitionAudioFeedback.Cue.PlacementSuccess);
+            nextStateAudioTime = Time.realtimeSinceStartup + stateAudioCooldownSeconds;
         }
     }
 }
