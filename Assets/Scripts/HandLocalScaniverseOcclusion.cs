@@ -33,6 +33,25 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
     [Range(0f, 1f)] public float handMaskIndexTipBlend = 0.65f;
     public GoGoInteractionController_NoY3[] redirectionControllers;
 
+    [Header("Forearm Box Mask")]
+    public bool enableForearmBoxMask = true;
+    public bool autoFindAvatarHandDriver = true;
+    public AvatarHandTrackingDriver avatarHandDriver;
+    public Transform leftElbowOverride;
+    public Transform rightElbowOverride;
+    [Tooltip("Use the avatar driver's captured hand-local forearm direction. Off by default because the avatar hand space can differ from the original hand anchor space.")]
+    public bool useAvatarCapturedForearmDirection = false;
+    [Tooltip("Prefer wrist-to-index-tip opposite direction for the forearm mask when an index tip is available.")]
+    public bool useIndexTipDirectionForForearmMask = true;
+    public Vector3 leftForearmMaskWristLocalDirection = Vector3.down;
+    public Vector3 rightForearmMaskWristLocalDirection = Vector3.down;
+    public float defaultForearmLengthMeters = 0.25f;
+    public Vector3 defaultWristToElbowLocalDirection = Vector3.back;
+    public float forearmBoxHalfWidthMeters = 0.3f;
+    public float forearmBoxHalfHeightMeters = 0.3f;
+    public float forearmBoxFeatherMeters = 0.07f;
+    public float forearmBoxDepthBiasMeters = 0.02f;
+
     [Header("Placement Safety")]
     public bool hideOverlayDuringAnchorPlacement = false;
     public ManualSpatialAnchorPlacer anchorPlacer;
@@ -80,6 +99,17 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int LeftHandPosId = Shader.PropertyToID("_LeftHandPos");
     private static readonly int RightHandPosId = Shader.PropertyToID("_RightHandPos");
+    private static readonly int LeftForearmStartId = Shader.PropertyToID("_LeftForearmStart");
+    private static readonly int LeftForearmEndId = Shader.PropertyToID("_LeftForearmEnd");
+    private static readonly int LeftForearmRightId = Shader.PropertyToID("_LeftForearmRight");
+    private static readonly int LeftForearmUpId = Shader.PropertyToID("_LeftForearmUp");
+    private static readonly int RightForearmStartId = Shader.PropertyToID("_RightForearmStart");
+    private static readonly int RightForearmEndId = Shader.PropertyToID("_RightForearmEnd");
+    private static readonly int RightForearmRightId = Shader.PropertyToID("_RightForearmRight");
+    private static readonly int RightForearmUpId = Shader.PropertyToID("_RightForearmUp");
+    private static readonly int ForearmBoxHalfSizeId = Shader.PropertyToID("_ForearmBoxHalfSize");
+    private static readonly int ForearmBoxFeatherId = Shader.PropertyToID("_ForearmBoxFeather");
+    private static readonly int ForearmBoxDepthBiasId = Shader.PropertyToID("_ForearmBoxDepthBias");
     private static readonly int RadiusId = Shader.PropertyToID("_Radius");
     private static readonly int FeatherId = Shader.PropertyToID("_Feather");
     private static readonly int DepthBiasId = Shader.PropertyToID("_DepthBias");
@@ -147,6 +177,8 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
 
         Vector3 left = ResolveHandPosition(leftHand, leftIndexTip, leftPinchProvider);
         Vector3 right = ResolveHandPosition(rightHand, rightIndexTip, rightPinchProvider);
+        ResolveForearmBoxMask(true, leftHand, leftIndexTip, leftElbowOverride, out Vector4 leftForearmStart, out Vector4 leftForearmEnd, out Vector4 leftForearmRight, out Vector4 leftForearmUp);
+        ResolveForearmBoxMask(false, rightHand, rightIndexTip, rightElbowOverride, out Vector4 rightForearmStart, out Vector4 rightForearmEnd, out Vector4 rightForearmRight, out Vector4 rightForearmUp);
         int objectMaskCount = CollectObjectMaskPositions();
 
         for (int i = 0; i < generatedObjects.Count; i++)
@@ -162,6 +194,21 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
             renderer.GetPropertyBlock(propertyBlock);
             propertyBlock.SetVector(LeftHandPosId, left);
             propertyBlock.SetVector(RightHandPosId, right);
+            propertyBlock.SetVector(LeftForearmStartId, leftForearmStart);
+            propertyBlock.SetVector(LeftForearmEndId, leftForearmEnd);
+            propertyBlock.SetVector(LeftForearmRightId, leftForearmRight);
+            propertyBlock.SetVector(LeftForearmUpId, leftForearmUp);
+            propertyBlock.SetVector(RightForearmStartId, rightForearmStart);
+            propertyBlock.SetVector(RightForearmEndId, rightForearmEnd);
+            propertyBlock.SetVector(RightForearmRightId, rightForearmRight);
+            propertyBlock.SetVector(RightForearmUpId, rightForearmUp);
+            propertyBlock.SetVector(ForearmBoxHalfSizeId, new Vector4(
+                Mathf.Max(0.001f, forearmBoxHalfWidthMeters),
+                Mathf.Max(0.001f, forearmBoxHalfHeightMeters),
+                0f,
+                0f));
+            propertyBlock.SetFloat(ForearmBoxFeatherId, Mathf.Max(0.0001f, forearmBoxFeatherMeters));
+            propertyBlock.SetFloat(ForearmBoxDepthBiasId, Mathf.Max(0f, forearmBoxDepthBiasMeters));
             propertyBlock.SetFloat(RadiusId, Mathf.Max(0.001f, radiusMeters));
             propertyBlock.SetFloat(FeatherId, Mathf.Max(0.0001f, featherMeters));
             propertyBlock.SetFloat(DepthBiasId, Mathf.Max(0f, handDepthBiasMeters));
@@ -352,6 +399,17 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
             }
 
             material.renderQueue = overlayRenderQueue;
+            material.SetVector(LeftForearmStartId, InvalidMaskVector());
+            material.SetVector(LeftForearmEndId, InvalidMaskVector());
+            material.SetVector(LeftForearmRightId, Vector4.zero);
+            material.SetVector(LeftForearmUpId, Vector4.zero);
+            material.SetVector(RightForearmStartId, InvalidMaskVector());
+            material.SetVector(RightForearmEndId, InvalidMaskVector());
+            material.SetVector(RightForearmRightId, Vector4.zero);
+            material.SetVector(RightForearmUpId, Vector4.zero);
+            material.SetVector(ForearmBoxHalfSizeId, new Vector4(forearmBoxHalfWidthMeters, forearmBoxHalfHeightMeters, 0f, 0f));
+            material.SetFloat(ForearmBoxFeatherId, forearmBoxFeatherMeters);
+            material.SetFloat(ForearmBoxDepthBiasId, forearmBoxDepthBiasMeters);
             material.SetFloat(RadiusId, radiusMeters);
             material.SetFloat(FeatherId, featherMeters);
             material.SetFloat(DepthBiasId, handDepthBiasMeters);
@@ -392,6 +450,8 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
             anchorPlacer = FindAnyObjectByType<ManualSpatialAnchorPlacer>();
         if (deskBinder == null)
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
+        if (autoFindAvatarHandDriver && avatarHandDriver == null)
+            avatarHandDriver = FindAnyObjectByType<AvatarHandTrackingDriver>();
 
         if (autoFindScaniverseRoots && (scaniverseRoots == null || scaniverseRoots.Length == 0))
             scaniverseRoots = FindScaniverseRoots();
@@ -443,6 +503,100 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
             leftHand = leftPinchProvider.transform;
         if (rightHand == null && rightPinchProvider != null)
             rightHand = rightPinchProvider.transform;
+    }
+
+    private void ResolveForearmBoxMask(
+        bool left,
+        Transform wrist,
+        Transform indexTip,
+        Transform elbowOverride,
+        out Vector4 start,
+        out Vector4 end,
+        out Vector4 right,
+        out Vector4 up)
+    {
+        start = InvalidMaskVector();
+        end = InvalidMaskVector();
+        right = Vector4.zero;
+        up = Vector4.zero;
+
+        if (!enableForearmBoxMask || wrist == null)
+            return;
+
+        Vector3 wristPosition = wrist.position;
+        Vector3 elbowPosition;
+        if (elbowOverride != null)
+        {
+            elbowPosition = elbowOverride.position;
+        }
+        else
+        {
+            float length = Mathf.Max(0.001f, defaultForearmLengthMeters);
+            Vector3 worldDirection = Vector3.zero;
+
+            AvatarHandTrackingDriver.HandRig rig = GetAvatarHandRig(left);
+            if (useAvatarCapturedForearmDirection && rig != null)
+            {
+                Vector3 localDirection = rig.wristToElbowLocalDirection.sqrMagnitude > 1e-8f
+                    ? rig.wristToElbowLocalDirection
+                    : defaultWristToElbowLocalDirection;
+                worldDirection = wrist.rotation * localDirection.normalized;
+                if (rig.wristToElbowLength > 0.001f)
+                    length = rig.wristToElbowLength;
+            }
+
+            if (worldDirection.sqrMagnitude < 1e-8f && useIndexTipDirectionForForearmMask && indexTip != null)
+                worldDirection = wristPosition - indexTip.position;
+
+            if (worldDirection.sqrMagnitude < 1e-8f)
+            {
+                Vector3 localDirection = left ? leftForearmMaskWristLocalDirection : rightForearmMaskWristLocalDirection;
+                if (localDirection.sqrMagnitude < 1e-8f)
+                    localDirection = defaultWristToElbowLocalDirection.sqrMagnitude > 1e-8f
+                        ? defaultWristToElbowLocalDirection
+                        : Vector3.down;
+                worldDirection = wrist.rotation * localDirection.normalized;
+            }
+
+            elbowPosition = wristPosition + worldDirection.normalized * length;
+        }
+
+        Vector3 segment = elbowPosition - wristPosition;
+        if (segment.sqrMagnitude < 1e-8f)
+            return;
+
+        Vector3 segmentDirection = segment.normalized;
+        Vector3 rightAxis = Vector3.ProjectOnPlane(wrist.right, segmentDirection);
+        if (rightAxis.sqrMagnitude < 1e-8f)
+            rightAxis = Vector3.ProjectOnPlane(wrist.up, segmentDirection);
+        if (rightAxis.sqrMagnitude < 1e-8f)
+            rightAxis = Vector3.Cross(segmentDirection, Vector3.up);
+        if (rightAxis.sqrMagnitude < 1e-8f)
+            rightAxis = Vector3.Cross(segmentDirection, Vector3.forward);
+
+        rightAxis.Normalize();
+        Vector3 upAxis = Vector3.Cross(segmentDirection, rightAxis);
+        if (upAxis.sqrMagnitude < 1e-8f)
+            return;
+        upAxis.Normalize();
+
+        start = new Vector4(wristPosition.x, wristPosition.y, wristPosition.z, 1f);
+        end = new Vector4(elbowPosition.x, elbowPosition.y, elbowPosition.z, 1f);
+        right = new Vector4(rightAxis.x, rightAxis.y, rightAxis.z, 0f);
+        up = new Vector4(upAxis.x, upAxis.y, upAxis.z, 0f);
+    }
+
+    private AvatarHandTrackingDriver.HandRig GetAvatarHandRig(bool left)
+    {
+        if (avatarHandDriver == null)
+            return null;
+
+        return left ? avatarHandDriver.leftHand : avatarHandDriver.rightHand;
+    }
+
+    private static Vector4 InvalidMaskVector()
+    {
+        return new Vector4(9999f, 9999f, 9999f, 0f);
     }
 
     private void AutoAssignRedirectionControllers()

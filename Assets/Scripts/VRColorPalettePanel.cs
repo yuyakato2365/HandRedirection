@@ -755,10 +755,10 @@ public class VRColorPalettePanel : MonoBehaviour
 
         for (int y = 0; y < height; y++)
         {
-            float saturation = y / (height - 1f);
+            float saturation = 1f - y / (height - 1f);
             for (int x = 0; x < width; x++)
             {
-                float hue = x / (width - 1f);
+                float hue = 1f - x / (width - 1f);
                 hueSaturationTexture.SetPixel(x, y, Color.HSVToRGB(hue, saturation, 1f));
             }
         }
@@ -790,7 +790,7 @@ public class VRColorPalettePanel : MonoBehaviour
         int height = valueTexture.height;
         for (int y = 0; y < height; y++)
         {
-            float value = y / (height - 1f);
+            float value = 1f - y / (height - 1f);
             Color color = Color.HSVToRGB(currentHue, currentSaturation, value);
             for (int x = 0; x < width; x++)
                 valueTexture.SetPixel(x, y, color);

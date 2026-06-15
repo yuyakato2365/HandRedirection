@@ -20,8 +20,11 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
 
         [Header("Shape")]
         public Vector3 baseHalfExtents = new Vector3(0.5f, 0.5f, 0.5f);
+        public bool autoScaleBaseHalfExtents = true;
 
         [NonSerialized] public Vector3 baseWarpedScale = Vector3.one;
+        [NonSerialized] public Vector3 initialBaseHalfExtents = Vector3.one;
+        [NonSerialized] public Vector3 initialShapeSourceScale = Vector3.one;
         [NonSerialized] public bool baseScaleInitialized = false;
         [NonSerialized] public Vector3 committedRatio = Vector3.one;
         [NonSerialized] public DeformableCubeController deformCtrl;
@@ -141,6 +144,7 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
             farRadius = Mathf.Max(targetFar, nearRadius + farEpsilon);
         }
 
+        RefreshAutoScaledBaseHalfExtents();
         EnsureAllWarpedObjectsDetached();
         UpdateAllWarpedObjectVisuals();
 
@@ -152,6 +156,13 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     }
 
     bool UseDeskMapping() => GetWarpOrigin() != null;
+
+    void RefreshAutoScaledBaseHalfExtents()
+    {
+        List<WarpObjectEntry> active = EnumerateActiveEntries();
+        for (int i = 0; i < active.Count; i++)
+            ApplyAutoScaledBaseHalfExtents(active[i]);
+    }
 
     Transform GetWarpOrigin()
     {
@@ -196,6 +207,8 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         legacy.realObject = cubeReal;
         legacy.warpedObject = cubeWarped;
         legacy.baseHalfExtents = baseHalfExtents;
+        legacy.initialBaseHalfExtents = baseHalfExtents;
+        legacy.initialShapeSourceScale = GetShapeSourceScale(legacy);
         legacy.committedRatio = Vector3.one;
 
         if (cubeWarped != null)
@@ -218,6 +231,9 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     {
         if (entry == null) return;
 
+        entry.initialBaseHalfExtents = entry.baseHalfExtents;
+        entry.initialShapeSourceScale = GetShapeSourceScale(entry);
+
         if (entry.warpedObject != null)
         {
             entry.baseWarpedScale = entry.warpedObject.localScale;
@@ -230,6 +246,7 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         }
 
         entry.committedRatio = Vector3.one;
+        ApplyAutoScaledBaseHalfExtents(entry);
     }
 
     void RegisterDeformCallbacks()
@@ -277,6 +294,44 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
             currentLocalScale.y / by,
             currentLocalScale.z / bz
         );
+    }
+
+    void ApplyAutoScaledBaseHalfExtents(WarpObjectEntry entry)
+    {
+        if (entry == null || !entry.autoScaleBaseHalfExtents)
+            return;
+
+        Vector3 currentScale = GetShapeSourceScale(entry);
+        Vector3 baseScale = entry.initialShapeSourceScale;
+        Vector3 ratio = new Vector3(
+            SafeScaleRatio(currentScale.x, baseScale.x),
+            SafeScaleRatio(currentScale.y, baseScale.y),
+            SafeScaleRatio(currentScale.z, baseScale.z)
+        );
+
+        entry.baseHalfExtents = new Vector3(
+            Mathf.Abs(entry.initialBaseHalfExtents.x * ratio.x),
+            Mathf.Abs(entry.initialBaseHalfExtents.y * ratio.y),
+            Mathf.Abs(entry.initialBaseHalfExtents.z * ratio.z)
+        );
+    }
+
+    static float SafeScaleRatio(float current, float basis)
+    {
+        basis = Mathf.Abs(basis) < 1e-6f ? 1e-6f : basis;
+        return current / basis;
+    }
+
+    static Vector3 GetShapeSourceScale(WarpObjectEntry entry)
+    {
+        Transform source = entry.realObject != null
+            ? entry.realObject
+            : (entry.realWorldSource != null ? entry.realWorldSource : entry.warpedObject);
+
+        if (source == null)
+            return Vector3.one;
+
+        return source.lossyScale;
     }
 
     void EnsureAllWarpedObjectsDetached()

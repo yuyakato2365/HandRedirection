@@ -6,6 +6,17 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
         _BaseColor ("Base Color", Color) = (1, 1, 1, 1)
         _LeftHandPos ("Left Hand Position", Vector) = (9999, 9999, 9999, 0)
         _RightHandPos ("Right Hand Position", Vector) = (9999, 9999, 9999, 0)
+        _LeftForearmStart ("Left Forearm Start", Vector) = (9999, 9999, 9999, 0)
+        _LeftForearmEnd ("Left Forearm End", Vector) = (9999, 9999, 9999, 0)
+        _LeftForearmRight ("Left Forearm Right", Vector) = (1, 0, 0, 0)
+        _LeftForearmUp ("Left Forearm Up", Vector) = (0, 1, 0, 0)
+        _RightForearmStart ("Right Forearm Start", Vector) = (9999, 9999, 9999, 0)
+        _RightForearmEnd ("Right Forearm End", Vector) = (9999, 9999, 9999, 0)
+        _RightForearmRight ("Right Forearm Right", Vector) = (1, 0, 0, 0)
+        _RightForearmUp ("Right Forearm Up", Vector) = (0, 1, 0, 0)
+        _ForearmBoxHalfSize ("Forearm Box Half Size", Vector) = (0.3, 0.3, 0, 0)
+        _ForearmBoxFeather ("Forearm Box Feather", Float) = 0.07
+        _ForearmBoxDepthBias ("Forearm Box Depth Bias", Float) = 0.02
         _Radius ("Hand Radius", Float) = 0.18
         _Feather ("Feather", Float) = 0.04
         _DepthBias ("Hand Depth Bias", Float) = 0.02
@@ -50,6 +61,17 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
                 float4 _BaseColor;
                 float4 _LeftHandPos;
                 float4 _RightHandPos;
+                float4 _LeftForearmStart;
+                float4 _LeftForearmEnd;
+                float4 _LeftForearmRight;
+                float4 _LeftForearmUp;
+                float4 _RightForearmStart;
+                float4 _RightForearmEnd;
+                float4 _RightForearmRight;
+                float4 _RightForearmUp;
+                float4 _ForearmBoxHalfSize;
+                float _ForearmBoxFeather;
+                float _ForearmBoxDepthBias;
                 float _Radius;
                 float _Feather;
                 float _DepthBias;
@@ -106,6 +128,39 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
                 return (1.0 - smoothstep(max(angularRadius - angularFeather, 0.0), angularRadius, angle)) * behindPoint;
             }
 
+            float ForearmBoxMask(
+                float3 start,
+                float3 end,
+                float3 rightAxis,
+                float3 upAxis,
+                float3 fragmentDirection,
+                float fragmentDistance,
+                float halfWidth,
+                float halfHeight,
+                float featherMeters,
+                float depthBias)
+            {
+                if (start.x >= 1000.0 || end.x >= 1000.0)
+                    return 0.0;
+
+                float3 segment = end - start;
+                float segmentLength = length(segment);
+                if (segmentLength <= 0.001)
+                    return 0.0;
+
+                float radius = max(max(halfWidth, halfHeight), 0.001);
+                float mask = 0.0;
+                [unroll]
+                for (int i = 0; i < 9; i++)
+                {
+                    float t = i / 8.0;
+                    float3 samplePosition = lerp(start, end, t);
+                    mask = max(mask, ViewConeMask(samplePosition, fragmentDirection, fragmentDistance, radius, featherMeters, depthBias));
+                }
+
+                return mask;
+            }
+
             half4 frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_INSTANCE_ID(input);
@@ -118,6 +173,30 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
                 float mask = max(
                     ViewConeMask(_LeftHandPos.xyz, fragmentDirection, fragmentDistance, _Radius, _Feather, _DepthBias),
                     ViewConeMask(_RightHandPos.xyz, fragmentDirection, fragmentDistance, _Radius, _Feather, _DepthBias));
+
+                mask = max(mask, ForearmBoxMask(
+                    _LeftForearmStart.xyz,
+                    _LeftForearmEnd.xyz,
+                    _LeftForearmRight.xyz,
+                    _LeftForearmUp.xyz,
+                    fragmentDirection,
+                    fragmentDistance,
+                    _ForearmBoxHalfSize.x,
+                    _ForearmBoxHalfSize.y,
+                    _ForearmBoxFeather,
+                    _ForearmBoxDepthBias));
+
+                mask = max(mask, ForearmBoxMask(
+                    _RightForearmStart.xyz,
+                    _RightForearmEnd.xyz,
+                    _RightForearmRight.xyz,
+                    _RightForearmUp.xyz,
+                    fragmentDirection,
+                    fragmentDistance,
+                    _ForearmBoxHalfSize.x,
+                    _ForearmBoxHalfSize.y,
+                    _ForearmBoxFeather,
+                    _ForearmBoxDepthBias));
 
                 int objectMaskCount = min(_ObjectMaskCount, 16);
                 for (int i = 0; i < objectMaskCount; i++)

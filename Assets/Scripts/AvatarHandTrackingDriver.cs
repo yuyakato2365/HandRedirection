@@ -60,6 +60,20 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         [Range(0.05f, 0.95f)] public float elbowPositionRatio = 0.5f;
         [Tooltip("Optional bend amount away from the shoulder-to-hand line. Keep 0 for a straight telescopic/robot arm.")]
         public float elbowBendOffset = 0f;
+        [Tooltip("Use wrist rotation and captured lower-arm length to estimate the elbow position.")]
+        public bool useWristRotationEstimatedElbow = true;
+        [Tooltip("How much the wrist-rotation elbow estimate affects the actual avatar arm. Keep 0 to avoid wrist-bend driven arm drift.")]
+        [Range(0f, 1f)] public float wristRotationElbowArmWeight = 0.3f;
+        [Tooltip("Maximum meters the wrist-rotation elbow estimate can pull the actual arm elbow away from the natural IK elbow.")]
+        public float maxWristRotationElbowArmOffset = 0.2f;
+        [Tooltip("Optional scene object moved to the wrist-rotation estimated elbow each frame.")]
+        public Transform estimatedElbowVisual;
+        [Tooltip("Captured hand-local direction from wrist/hand to elbow. Use Capture Arm Bind Pose to refresh.")]
+        public Vector3 wristToElbowLocalDirection = Vector3.back;
+        [Tooltip("Captured lower-arm length used by the wrist-rotation elbow estimate.")]
+        public float wristToElbowLength = 0.25f;
+        public Vector3 estimatedElbowPosition;
+        public bool estimatedElbowValid;
 
         [Header("Avatar Fingers")]
         public Transform thumbProximal;
@@ -97,8 +111,49 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         [Range(0f, 1f)] public float fistCurlBoost = 0f;
         [Range(0.1f, 3f)] public float fingerCurlResponse = 0.45f;
         [Range(0f, 1f)] public float distalCurlMultiplier = 1.15f;
+        [Tooltip("Experimental: drive finger bones from tracked wrist-relative segment delta rotations. Keep off unless explicitly testing full pose copy.")]
+        public bool useJointPoseSegmentDeltaRotations = false;
+        [Range(0f, 1f)] public float segmentDeltaRotationWeight = 1f;
+        [Range(1f, 180f)] public float segmentDeltaMaxDegreesPerFrame = 90f;
+        [Tooltip("Flip all copied segment delta rotations. Set to -1 when all fingers bend opposite to the real hand.")]
+        public float segmentDeltaRotationDirection = -1f;
+        [Tooltip("Capture the first valid tracked pose as the neutral segment pose for delta rotations.")]
+        public bool autoCalibrateSegmentDeltaOpenPose = true;
+        [Tooltip("Flip source wrist-local delta axes if the copied motion is mirrored.")]
+        public Vector3 segmentDeltaAxisSign = Vector3.one;
+        [Tooltip("Debug: first segment side-to-side deltas for index/middle/ring/little in tracked wrist-local space.")]
+        public Vector4 segmentDeltaFourFingerSpreadDebug;
+        public string segmentDeltaDebug;
         [Tooltip("Use HandDataAsset.JointPoses to compute each finger's own curl. This is the independent-finger path.")]
         public bool useJointPoseFingerCurl = true;
+        [Tooltip("Add side-to-side spread only to the index/middle/ring/little proximal bones from JointPoses.")]
+        public bool useJointPoseProximalSpread = true;
+        [Range(0f, 1f)] public float proximalSpreadWeight = 0.7f;
+        [Tooltip("Fallback local axis used only when palm-normal spread axis is unavailable.")]
+        public Vector3 proximalSpreadAxis = Vector3.up;
+        [Tooltip("Flip the wrist-fixed palm-normal axis used to rotate finger spread.")]
+        public bool invertProximalSpreadPalmAxis = false;
+        [Tooltip("Flip all four-finger spread input when opening/closing moves backward.")]
+        public float proximalSpreadDirection = 1f;
+        [Tooltip("Flip only the left hand's four-finger spread input.")]
+        public bool mirrorLeftProximalSpread = true;
+        [Tooltip("Flip only the right hand's four-finger spread input.")]
+        public bool mirrorRightProximalSpread = true;
+        [Tooltip("Capture the first valid tracked pose as the neutral four-finger spread pose.")]
+        public bool autoCalibrateProximalSpreadOpenPose = true;
+        [Range(0f, 0.5f)] public float proximalSpreadDeadZone = 0.02f;
+        [Range(1f, 30f)] public float proximalSpreadInputScale = 10f;
+        [Tooltip("Per-finger multiplier for index/middle/ring/little spread input after global scaling.")]
+        public Vector4 proximalSpreadFingerScale = Vector4.one;
+        [Tooltip("Per-finger offset for index/middle/ring/little spread input after scaling. Use small values like +/-0.1.")]
+        public Vector4 proximalSpreadInputOffset = Vector4.zero;
+        public float indexProximalSpreadDegrees = 25f;
+        public float middleProximalSpreadDegrees = 10f;
+        public float ringProximalSpreadDegrees = 12f;
+        public float littleProximalSpreadDegrees = 25f;
+        public Vector4 proximalSpreadInput;
+        public Vector3 proximalSpreadPalmNormal;
+        public string proximalSpreadDebug;
         [Tooltip("Capture the first valid tracked hand pose as the open-hand reference for JointPoses curl.")]
         public bool autoCalibrateJointCurlOpenPose = true;
         public float jointCurlOpenAngle = 8f;
@@ -184,11 +239,43 @@ public class AvatarHandTrackingDriver : MonoBehaviour
     public float maxElbowBendOffset = 0.35f;
     public float maxIkReachScale = 0.98f;
 
+    struct JointPoseLayout
+    {
+        public string name;
+        public int wrist;
+        public int thumb0;
+        public int thumb1;
+        public int thumb2;
+        public int thumb3;
+        public int thumbTip;
+        public int indexBase;
+        public int index2;
+        public int index3;
+        public int indexTip;
+        public int middleBase;
+        public int middle2;
+        public int middle3;
+        public int middleTip;
+        public int ringBase;
+        public int ring2;
+        public int ring3;
+        public int ringTip;
+        public int littleBase;
+        public int little2;
+        public int little3;
+        public int littleTip;
+    }
+
     readonly Dictionary<Transform, Quaternion> _sourceBindRotations = new Dictionary<Transform, Quaternion>();
     readonly Dictionary<Transform, Quaternion> _targetBindRotations = new Dictionary<Transform, Quaternion>();
     readonly Dictionary<Transform, Transform> _fingerMap = new Dictionary<Transform, Transform>();
     readonly Dictionary<HandRig, float[]> _jointOpenCurlAngles = new Dictionary<HandRig, float[]>();
+    readonly Dictionary<HandRig, Vector3[]> _jointOpenSegmentDirections = new Dictionary<HandRig, Vector3[]>();
     readonly Dictionary<HandRig, Vector3> _thumbOpenPalmComponents = new Dictionary<HandRig, Vector3>();
+    readonly Dictionary<HandRig, Vector4> _openProximalSpreadComponents = new Dictionary<HandRig, Vector4>();
+    readonly Dictionary<HandRig, Vector3> _openProximalSpreadPalmRights = new Dictionary<HandRig, Vector3>();
+    readonly Dictionary<HandRig, Vector3> _openProximalSpreadPalmNormals = new Dictionary<HandRig, Vector3>();
+    readonly Dictionary<HandRig, Vector3> _avatarProximalSpreadAxisLocal = new Dictionary<HandRig, Vector3>();
     readonly Dictionary<HandRig, Vector3> _forearmNeutralWristRefs = new Dictionary<HandRig, Vector3>();
     readonly Dictionary<HandRig, Quaternion> _lastForearmTwists = new Dictionary<HandRig, Quaternion>();
     readonly Dictionary<HandRig, float> _lastForearmTwistAngles = new Dictionary<HandRig, float>();
@@ -261,6 +348,13 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         rig.thumbSpreadDirection = NormalizeSign(rig.thumbSpreadDirection);
         rig.thumbOutOfPalmDirection = NormalizeSign(rig.thumbOutOfPalmDirection);
         rig.thumbCurlDirection = NormalizeSign(rig.thumbCurlDirection);
+        rig.segmentDeltaRotationDirection = NormalizeSign(rig.segmentDeltaRotationDirection);
+        rig.segmentDeltaAxisSign = NormalizeAxisSigns(rig.segmentDeltaAxisSign);
+        rig.proximalSpreadDirection = NormalizeSign(rig.proximalSpreadDirection);
+        if (rig.proximalSpreadAxis == Vector3.zero)
+            rig.proximalSpreadAxis = Vector3.up;
+        if (rig.proximalSpreadFingerScale == Vector4.zero)
+            rig.proximalSpreadFingerScale = Vector4.one;
         rig.forearmTwistDirection = NormalizeSign(rig.forearmTwistDirection);
         if (rig.isLeft && Mathf.Approximately(rig.poleDirectionLocal.x, 0f) && Mathf.Approximately(rig.poleSideOffsetX, 0f))
             rig.poleSideOffsetX = -0.25f;
@@ -273,6 +367,14 @@ public class AvatarHandTrackingDriver : MonoBehaviour
     static float NormalizeSign(float value)
     {
         return value < 0f ? -1f : 1f;
+    }
+
+    static Vector3 NormalizeAxisSigns(Vector3 signs)
+    {
+        return new Vector3(
+            NormalizeSign(signs.x),
+            NormalizeSign(signs.y),
+            NormalizeSign(signs.z));
     }
 
     void LateUpdate()
@@ -399,7 +501,12 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         _sourceBindRotations.Clear();
         _targetBindRotations.Clear();
         _fingerMap.Clear();
+        _jointOpenSegmentDirections.Clear();
         _thumbOpenPalmComponents.Clear();
+        _openProximalSpreadComponents.Clear();
+        _openProximalSpreadPalmRights.Clear();
+        _openProximalSpreadPalmNormals.Clear();
+        _avatarProximalSpreadAxisLocal.Clear();
 
         CaptureFingerBindPose(leftHand);
         CaptureFingerBindPose(rightHand);
@@ -423,6 +530,7 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         AddArmBindTransform(rig.upperArm);
         AddArmBindTransform(rig.lowerArm);
         AddArmBindTransform(rig.hand);
+        CaptureWristRotationElbowReference(rig);
     }
 
     void AddArmBindTransform(Transform bone)
@@ -432,6 +540,19 @@ public class AvatarHandTrackingDriver : MonoBehaviour
 
         _armBindLocalPositions[bone] = bone.localPosition;
         _armBindLocalRotations[bone] = bone.localRotation;
+    }
+
+    void CaptureWristRotationElbowReference(HandRig rig)
+    {
+        if (rig == null || rig.hand == null || rig.lowerArm == null)
+            return;
+
+        Vector3 wristToElbow = rig.lowerArm.position - rig.hand.position;
+        if (wristToElbow.sqrMagnitude < 1e-8f)
+            return;
+
+        rig.wristToElbowLength = wristToElbow.magnitude;
+        rig.wristToElbowLocalDirection = Quaternion.Inverse(rig.hand.rotation) * wristToElbow.normalized;
     }
 
     void ResetArmToBindPose(HandRig rig)
@@ -469,24 +590,33 @@ public class AvatarHandTrackingDriver : MonoBehaviour
             return;
 
         Pose[] jointPoses = GetJointPosesFromHandDataSource(rig.handDataSource);
-        if (jointPoses == null || jointPoses.Length < 26)
+        if (!TryGetJointPoseLayout(jointPoses, out JointPoseLayout layout))
             return;
 
         float[] openAngles =
         {
-            ComputeCurlAngleFromJointPoseChain(jointPoses, 2, 3, 4, 5),
-            ComputeCurlAngleFromJointPoseChain(jointPoses, 6, 7, 8, 9, 10),
-            ComputeCurlAngleFromJointPoseChain(jointPoses, 11, 12, 13, 14, 15),
-            ComputeCurlAngleFromJointPoseChain(jointPoses, 16, 17, 18, 19, 20),
-            ComputeCurlAngleFromJointPoseChain(jointPoses, 21, 22, 23, 24, 25)
+            ComputeCurlAngleFromJointPoseChain(jointPoses, layout.thumb0, layout.thumb1, layout.thumb2, layout.thumb3, layout.thumbTip),
+            ComputeCurlAngleFromJointPoseChain(jointPoses, layout.indexBase, layout.index2, layout.index3, layout.indexTip),
+            ComputeCurlAngleFromJointPoseChain(jointPoses, layout.middleBase, layout.middle2, layout.middle3, layout.middleTip),
+            ComputeCurlAngleFromJointPoseChain(jointPoses, layout.ringBase, layout.ring2, layout.ring3, layout.ringTip),
+            ComputeCurlAngleFromJointPoseChain(jointPoses, layout.littleBase, layout.little2, layout.little3, layout.littleTip)
         };
 
         _jointOpenCurlAngles[rig] = openAngles;
         if (TryGetThumbPalmComponents(jointPoses, out Vector3 thumbOpen))
             _thumbOpenPalmComponents[rig] = thumbOpen;
+        if (TryGetProximalSpreadComponents(rig, jointPoses, out Vector4 proximalSpreadOpen, out Vector3 proximalPalmRight, out Vector3 proximalPalmNormal, out _))
+        {
+            _openProximalSpreadComponents[rig] = proximalSpreadOpen;
+            _openProximalSpreadPalmRights[rig] = proximalPalmRight;
+            _openProximalSpreadPalmNormals[rig] = proximalPalmNormal;
+        }
+        if (TryGetWristLocalSegmentDirections(jointPoses, out Vector3[] segmentDirections))
+            _jointOpenSegmentDirections[rig] = segmentDirections;
         rig.jointCurlDebug =
-            $"captured open {openAngles[0]:0}/{openAngles[1]:0}/{openAngles[2]:0}/{openAngles[3]:0}/{openAngles[4]:0} " +
-            $"thumbOpen {thumbOpen.x:0.00}/{thumbOpen.y:0.00}/{thumbOpen.z:0.00}";
+            $"captured {layout.name} open {openAngles[0]:0}/{openAngles[1]:0}/{openAngles[2]:0}/{openAngles[3]:0}/{openAngles[4]:0} " +
+            $"thumbOpen {thumbOpen.x:0.00}/{thumbOpen.y:0.00}/{thumbOpen.z:0.00} " +
+            $"spreadOpen {proximalSpreadOpen.x:0.00}/{proximalSpreadOpen.y:0.00}/{proximalSpreadOpen.z:0.00}/{proximalSpreadOpen.w:0.00}";
     }
 
     [ContextMenu("Avatar Hand Driver/Capture Wrist Rotation Offsets")]
@@ -528,6 +658,7 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         rig.shoulderToWristTargetDistance = shoulderForDebug != null
             ? Vector3.Distance(shoulderForDebug.position, targetPosition)
             : 0f;
+        UpdateWristRotationEstimatedElbow(rig, targetPosition, targetRotation);
 
         if (solveArmIk && rig.upperArm != null && rig.lowerArm != null)
         {
@@ -546,6 +677,41 @@ public class AvatarHandTrackingDriver : MonoBehaviour
 
         if (driveFingerRotations)
             DriveFingers(rig);
+    }
+
+    public bool TryGetEstimatedElbow(bool left, out Vector3 elbowPosition)
+    {
+        HandRig rig = left ? leftHand : rightHand;
+        elbowPosition = rig != null ? rig.estimatedElbowPosition : Vector3.zero;
+        return rig != null && rig.estimatedElbowValid;
+    }
+
+    void UpdateWristRotationEstimatedElbow(HandRig rig, Vector3 wristPosition, Quaternion wristRotation)
+    {
+        if (rig == null)
+            return;
+
+        rig.estimatedElbowValid = false;
+        if (!rig.useWristRotationEstimatedElbow)
+            return;
+
+        Vector3 localDirection = rig.wristToElbowLocalDirection;
+        if (localDirection.sqrMagnitude < 1e-8f)
+            localDirection = Vector3.back;
+
+        float length = rig.wristToElbowLength;
+        if (length <= 0.001f && rig.lowerArm != null && rig.hand != null)
+            length = Vector3.Distance(rig.lowerArm.position, rig.hand.position);
+
+        if (length <= 0.001f)
+            return;
+
+        Vector3 elbowPosition = wristPosition + wristRotation * localDirection.normalized * length;
+        rig.estimatedElbowPosition = elbowPosition;
+        rig.estimatedElbowValid = true;
+
+        if (rig.estimatedElbowVisual != null)
+            rig.estimatedElbowVisual.position = elbowPosition;
     }
 
     bool IsTracked(HandRig rig)
@@ -624,6 +790,7 @@ public class AvatarHandTrackingDriver : MonoBehaviour
 
         Vector3 desiredMid = root + targetDir * projected + poleDir * height;
         Vector3 desiredEnd = root + targetDir * distance;
+        desiredMid = BlendWristRotationElbowForArm(rig, desiredMid);
 
         Quaternion upperDelta = Quaternion.FromToRotation(mid - root, desiredMid - root);
         rig.upperArm.rotation = upperDelta * rig.upperArm.rotation;
@@ -655,12 +822,30 @@ public class AvatarHandTrackingDriver : MonoBehaviour
 
         if (Mathf.Abs(bendOffset) > 0.0001f)
             elbowPosition += GetPoleDirection(rig, shoulderPosition, armDirection, targetRotation) * bendOffset;
+        elbowPosition = BlendWristRotationElbowForArm(rig, elbowPosition);
 
         RotateBoneToward(rig.upperArm, rig.lowerArm.position, elbowPosition);
         rig.lowerArm.position = Vector3.Lerp(rig.lowerArm.position, elbowPosition, rig.positionWeight);
 
         RotateBoneToward(rig.lowerArm, rig.hand.position, targetPosition);
         rig.hand.position = Vector3.Lerp(rig.hand.position, targetPosition, rig.positionWeight);
+    }
+
+    Vector3 BlendWristRotationElbowForArm(HandRig rig, Vector3 naturalElbowPosition)
+    {
+        if (rig == null || !rig.useWristRotationEstimatedElbow || !rig.estimatedElbowValid)
+            return naturalElbowPosition;
+
+        float weight = Mathf.Clamp01(rig.wristRotationElbowArmWeight);
+        if (weight <= 0f)
+            return naturalElbowPosition;
+
+        Vector3 offset = rig.estimatedElbowPosition - naturalElbowPosition;
+        float maxOffset = Mathf.Max(0f, rig.maxWristRotationElbowArmOffset);
+        if (maxOffset > 0f && offset.magnitude > maxOffset)
+            offset = offset.normalized * maxOffset;
+
+        return Vector3.Lerp(naturalElbowPosition, naturalElbowPosition + offset, weight);
     }
 
     static void RotateBoneToward(Transform bone, Vector3 currentChildPosition, Vector3 desiredChildPosition)
@@ -778,6 +963,9 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         if (rig.useJointPoseFingerCurl && DriveFingersFromJointPoses(rig))
             return;
 
+        if (rig.useJointPoseSegmentDeltaRotations && DriveFingersFromJointPoseSegmentDeltas(rig))
+            return;
+
         if (rig.ovrSkeleton == null || rig.ovrSkeleton.Bones == null)
         {
             if (usePinchStrengthFingerFallback)
@@ -811,6 +999,40 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         return true;
     }
 
+    bool DriveFingersFromJointPoseSegmentDeltas(HandRig rig)
+    {
+        Pose[] jointPoses = GetJointPosesFromHandDataSource(rig.handDataSource);
+        if (jointPoses == null || jointPoses.Length < 26)
+        {
+            rig.segmentDeltaDebug = jointPoses == null ? "segment delta: JointPoses null" : $"segment delta: JointPoses length {jointPoses.Length}";
+            return false;
+        }
+
+        if (!TryGetWristLocalSegmentDirections(jointPoses, out Vector3[] currentDirections))
+        {
+            rig.segmentDeltaDebug = "segment delta: source directions unavailable";
+            return false;
+        }
+
+        Vector3[] openDirections = GetOrCaptureOpenSegmentDirections(rig, currentDirections);
+        if (openDirections == null || openDirections.Length != currentDirections.Length)
+        {
+            rig.segmentDeltaDebug = "segment delta: open directions unavailable";
+            return false;
+        }
+        UpdateSegmentDeltaFourFingerSpreadDebug(rig, openDirections, currentDirections);
+
+        ApplySegmentDeltaChain(rig, openDirections, currentDirections, 0, rig.thumbProximal, rig.thumbIntermediate, rig.thumbDistal);
+        ApplySegmentDeltaChain(rig, openDirections, currentDirections, 3, rig.indexProximal, rig.indexIntermediate, rig.indexDistal);
+        ApplySegmentDeltaChain(rig, openDirections, currentDirections, 6, rig.middleProximal, rig.middleIntermediate, rig.middleDistal);
+        ApplySegmentDeltaChain(rig, openDirections, currentDirections, 9, rig.ringProximal, rig.ringIntermediate, rig.ringDistal);
+        ApplySegmentDeltaChain(rig, openDirections, currentDirections, 12, rig.littleProximal, rig.littleIntermediate, rig.littleDistal);
+
+        rig.fingerInputSource = "HandDataAsset.SegmentDelta";
+        rig.segmentDeltaDebug = "segment delta applied";
+        return true;
+    }
+
     void CopyFinger(HandRig rig, OVRSkeleton.BoneId sourceBoneId, Transform target)
     {
         if (target == null)
@@ -836,6 +1058,8 @@ public class AvatarHandTrackingDriver : MonoBehaviour
 
     void DriveFingersFromPinchStrength(HandRig rig)
     {
+        rig.proximalSpreadInput = Vector4.zero;
+
         float thumb = 0f;
         float index = 0f;
         float middle = 0f;
@@ -849,6 +1073,120 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         little = GetFingerStrength(rig, OVRHand.HandFinger.Pinky);
 
         ApplyFingerCurlValues(rig, thumb, index, middle, ring, little, "PinchStrength fallback");
+    }
+
+    static readonly int[,] SegmentDeltaSourcePairs =
+    {
+        { 2, 3 }, { 3, 4 }, { 4, 5 },
+        { 6, 7 }, { 7, 8 }, { 8, 9 },
+        { 11, 12 }, { 12, 13 }, { 13, 14 },
+        { 16, 17 }, { 17, 18 }, { 18, 19 },
+        { 21, 22 }, { 22, 23 }, { 23, 24 }
+    };
+
+    bool TryGetWristLocalSegmentDirections(Pose[] jointPoses, out Vector3[] directions)
+    {
+        directions = null;
+        if (jointPoses == null || jointPoses.Length < 26)
+            return false;
+
+        Quaternion wristRotation = jointPoses[1].rotation;
+        directions = new Vector3[SegmentDeltaSourcePairs.GetLength(0)];
+        for (int i = 0; i < directions.Length; i++)
+        {
+            int from = SegmentDeltaSourcePairs[i, 0];
+            int to = SegmentDeltaSourcePairs[i, 1];
+            Vector3 worldDirection = jointPoses[to].position - jointPoses[from].position;
+            if (worldDirection.sqrMagnitude < 1e-8f)
+                return false;
+
+            Vector3 wristLocal = Quaternion.Inverse(wristRotation) * worldDirection.normalized;
+            if (wristLocal.sqrMagnitude < 1e-8f)
+                return false;
+
+            directions[i] = wristLocal.normalized;
+        }
+
+        return true;
+    }
+
+    Vector3[] GetOrCaptureOpenSegmentDirections(HandRig rig, Vector3[] currentDirections)
+    {
+        if (_jointOpenSegmentDirections.TryGetValue(rig, out Vector3[] openDirections) &&
+            openDirections != null &&
+            openDirections.Length == currentDirections.Length)
+        {
+            return openDirections;
+        }
+
+        if (!rig.autoCalibrateSegmentDeltaOpenPose || currentDirections == null)
+            return null;
+
+        openDirections = new Vector3[currentDirections.Length];
+        Array.Copy(currentDirections, openDirections, currentDirections.Length);
+        _jointOpenSegmentDirections[rig] = openDirections;
+        return openDirections;
+    }
+
+    void UpdateSegmentDeltaFourFingerSpreadDebug(HandRig rig, Vector3[] openDirections, Vector3[] currentDirections)
+    {
+        if (rig == null || openDirections == null || currentDirections == null || currentDirections.Length < 13)
+            return;
+
+        Vector3 axisSign = NormalizeAxisSigns(rig.segmentDeltaAxisSign);
+        rig.segmentDeltaFourFingerSpreadDebug = new Vector4(
+            Vector3.Scale(currentDirections[3], axisSign).x - Vector3.Scale(openDirections[3], axisSign).x,
+            Vector3.Scale(currentDirections[6], axisSign).x - Vector3.Scale(openDirections[6], axisSign).x,
+            Vector3.Scale(currentDirections[9], axisSign).x - Vector3.Scale(openDirections[9], axisSign).x,
+            Vector3.Scale(currentDirections[12], axisSign).x - Vector3.Scale(openDirections[12], axisSign).x);
+    }
+
+    void ApplySegmentDeltaChain(
+        HandRig rig,
+        Vector3[] openDirections,
+        Vector3[] currentDirections,
+        int startIndex,
+        Transform proximal,
+        Transform intermediate,
+        Transform distal)
+    {
+        ApplySegmentDeltaToBone(rig, openDirections[startIndex], currentDirections[startIndex], proximal);
+        ApplySegmentDeltaToBone(rig, openDirections[startIndex + 1], currentDirections[startIndex + 1], intermediate);
+        ApplySegmentDeltaToBone(rig, openDirections[startIndex + 2], currentDirections[startIndex + 2], distal);
+    }
+
+    void ApplySegmentDeltaToBone(HandRig rig, Vector3 openDirection, Vector3 currentDirection, Transform bone)
+    {
+        if (bone == null)
+            return;
+
+        if (!_targetBindRotations.TryGetValue(bone, out Quaternion bindRotation))
+        {
+            bindRotation = bone.localRotation;
+            _targetBindRotations[bone] = bindRotation;
+        }
+
+        Vector3 axisSign = NormalizeAxisSigns(rig.segmentDeltaAxisSign);
+        Vector3 open = Vector3.Scale(openDirection, axisSign).normalized;
+        Vector3 current = Vector3.Scale(currentDirection, axisSign).normalized;
+        Quaternion delta = Quaternion.FromToRotation(open, current);
+        delta.ToAngleAxis(out float angle, out Vector3 axis);
+        if (float.IsNaN(axis.x) || axis.sqrMagnitude < 1e-8f)
+        {
+            bone.localRotation = Quaternion.Slerp(bone.localRotation, bindRotation, rig.segmentDeltaRotationWeight);
+            return;
+        }
+
+        if (angle > 180f)
+            angle -= 360f;
+        angle = Mathf.Clamp(angle, -rig.segmentDeltaMaxDegreesPerFrame, rig.segmentDeltaMaxDegreesPerFrame) * rig.segmentDeltaRotationDirection;
+        Quaternion limitedDelta = Quaternion.AngleAxis(angle, axis.normalized);
+        Quaternion handRotation = rig.hand != null ? rig.hand.rotation : Quaternion.identity;
+        Quaternion parentRotation = bone.parent != null ? bone.parent.rotation : Quaternion.identity;
+        Quaternion worldDelta = handRotation * limitedDelta * Quaternion.Inverse(handRotation);
+        Quaternion parentLocalDelta = Quaternion.Inverse(parentRotation) * worldDelta * parentRotation;
+        Quaternion desired = parentLocalDelta * bindRotation;
+        bone.localRotation = Quaternion.Slerp(bone.localRotation, desired, rig.segmentDeltaRotationWeight);
     }
 
     void ApplyFingerCurlValues(HandRig rig, float thumb, float index, float middle, float ring, float little, string inputSource)
@@ -866,15 +1204,31 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         rig.ringStrength = new Vector2(ring, ringCurl);
         rig.littleStrength = new Vector2(little, littleCurl);
 
+        float indexSpreadGate = ComputeOpenHandSpreadGate(index);
+        float middleSpreadGate = ComputeOpenHandSpreadGate(middle);
+        float ringSpreadGate = ComputeOpenHandSpreadGate(ring);
+        float littleSpreadGate = ComputeOpenHandSpreadGate(little);
+
         ApplyThumbCurl(rig, Mathf.Lerp(rig.thumbOpenCurl, rig.thumbClosedCurl, thumb), rig.fingerWeight);
         ApplyFingerCurl(rig, rig.indexProximal, rig.indexIntermediate, rig.indexDistal,
-            indexCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees);
+            indexCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees,
+            rig.proximalSpreadInput.x * rig.indexProximalSpreadDegrees * indexSpreadGate);
         ApplyFingerCurl(rig, rig.middleProximal, rig.middleIntermediate, rig.middleDistal,
-            middleCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees);
+            middleCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees,
+            rig.proximalSpreadInput.y * rig.middleProximalSpreadDegrees * middleSpreadGate);
         ApplyFingerCurl(rig, rig.ringProximal, rig.ringIntermediate, rig.ringDistal,
-            ringCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees);
+            ringCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees,
+            rig.proximalSpreadInput.z * rig.ringProximalSpreadDegrees * ringSpreadGate);
         ApplyFingerCurl(rig, rig.littleProximal, rig.littleIntermediate, rig.littleDistal,
-            littleCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees);
+            littleCurl, rig.fingerWeight, rig.fingerOpenExtensionDegrees,
+            rig.proximalSpreadInput.w * rig.littleProximalSpreadDegrees * littleSpreadGate);
+    }
+
+    static float ComputeOpenHandSpreadGate(float fingerStrength)
+    {
+        float closed = Mathf.Clamp01(fingerStrength);
+        float smoothClosed = closed * closed * (3f - 2f * closed);
+        return 1f - smoothClosed;
     }
 
     float ComputeFingerCurl(HandRig rig, float fingerStrength, float fistStrength)
@@ -895,15 +1249,15 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         thumb = index = middle = ring = little = 0f;
 
         Pose[] jointPoses = GetJointPosesFromHandDataSource(rig.handDataSource);
-        if (jointPoses == null || jointPoses.Length < 26)
+        if (!TryGetJointPoseLayout(jointPoses, out JointPoseLayout layout))
             return false;
 
         float[] rawAngles = new float[5];
-        rawAngles[0] = ComputeCurlAngleFromJointPoseChain(jointPoses, 2, 3, 4, 5);
-        rawAngles[1] = ComputeCurlAngleFromJointPoseChain(jointPoses, 6, 7, 8, 9, 10);
-        rawAngles[2] = ComputeCurlAngleFromJointPoseChain(jointPoses, 11, 12, 13, 14, 15);
-        rawAngles[3] = ComputeCurlAngleFromJointPoseChain(jointPoses, 16, 17, 18, 19, 20);
-        rawAngles[4] = ComputeCurlAngleFromJointPoseChain(jointPoses, 21, 22, 23, 24, 25);
+        rawAngles[0] = ComputeCurlAngleFromJointPoseChain(jointPoses, layout.thumb0, layout.thumb1, layout.thumb2, layout.thumb3, layout.thumbTip);
+        rawAngles[1] = ComputeCurlAngleFromJointPoseChain(jointPoses, layout.indexBase, layout.index2, layout.index3, layout.indexTip);
+        rawAngles[2] = ComputeCurlAngleFromJointPoseChain(jointPoses, layout.middleBase, layout.middle2, layout.middle3, layout.middleTip);
+        rawAngles[3] = ComputeCurlAngleFromJointPoseChain(jointPoses, layout.ringBase, layout.ring2, layout.ring3, layout.ringTip);
+        rawAngles[4] = ComputeCurlAngleFromJointPoseChain(jointPoses, layout.littleBase, layout.little2, layout.little3, layout.littleTip);
 
         float[] openAngles = GetOrCaptureOpenCurlAngles(rig, rawAngles);
         thumb = NormalizeJointCurl(rig, rawAngles[0], openAngles[0]);
@@ -914,12 +1268,243 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         rig.thumbBallInput = rig.useThumbBallFromJointPose
             ? ComputeThumbBallInput(rig, jointPoses)
             : Vector3.zero;
+        rig.proximalSpreadInput = rig.useJointPoseProximalSpread
+            ? ComputeProximalSpreadInput(rig, jointPoses)
+            : Vector4.zero;
 
         rig.jointCurlDebug =
-            $"raw {rawAngles[0]:0}/{rawAngles[1]:0}/{rawAngles[2]:0}/{rawAngles[3]:0}/{rawAngles[4]:0} " +
+            $"{layout.name} raw {rawAngles[0]:0}/{rawAngles[1]:0}/{rawAngles[2]:0}/{rawAngles[3]:0}/{rawAngles[4]:0} " +
             $"open {openAngles[0]:0}/{openAngles[1]:0}/{openAngles[2]:0}/{openAngles[3]:0}/{openAngles[4]:0} " +
-            $"thumbBall {rig.thumbBallInput.x:0.00}/{rig.thumbBallInput.y:0.00}/{rig.thumbBallInput.z:0.00}";
+            $"thumbBall {rig.thumbBallInput.x:0.00}/{rig.thumbBallInput.y:0.00}/{rig.thumbBallInput.z:0.00} " +
+            $"spread {rig.proximalSpreadInput.x:0.00}/{rig.proximalSpreadInput.y:0.00}/{rig.proximalSpreadInput.z:0.00}/{rig.proximalSpreadInput.w:0.00}";
 
+        return true;
+    }
+
+    static bool TryGetJointPoseLayout(Pose[] poses, out JointPoseLayout layout)
+    {
+        layout = default;
+        if (poses == null)
+            return false;
+
+        if (poses.Length >= 26)
+        {
+            layout = new JointPoseLayout
+            {
+                name = "OpenXR26",
+                wrist = 1,
+                thumb0 = 2,
+                thumb1 = 3,
+                thumb2 = 4,
+                thumb3 = 5,
+                thumbTip = 5,
+                indexBase = 7,
+                index2 = 8,
+                index3 = 9,
+                indexTip = 10,
+                middleBase = 12,
+                middle2 = 13,
+                middle3 = 14,
+                middleTip = 15,
+                ringBase = 17,
+                ring2 = 18,
+                ring3 = 19,
+                ringTip = 20,
+                littleBase = 22,
+                little2 = 23,
+                little3 = 24,
+                littleTip = 25
+            };
+            return true;
+        }
+
+        if (poses.Length >= 24)
+        {
+            layout = new JointPoseLayout
+            {
+                name = "OVR24",
+                wrist = 0,
+                thumb0 = 2,
+                thumb1 = 3,
+                thumb2 = 4,
+                thumb3 = 5,
+                thumbTip = 19,
+                indexBase = 6,
+                index2 = 7,
+                index3 = 8,
+                indexTip = 20,
+                middleBase = 9,
+                middle2 = 10,
+                middle3 = 11,
+                middleTip = 21,
+                ringBase = 12,
+                ring2 = 13,
+                ring3 = 14,
+                ringTip = 22,
+                littleBase = 16,
+                little2 = 17,
+                little3 = 18,
+                littleTip = 23
+            };
+            return true;
+        }
+
+        return false;
+    }
+
+    Vector4 ComputeProximalSpreadInput(HandRig rig, Pose[] poses)
+    {
+        if (!TryGetProximalSpreadComponents(rig, poses, out Vector4 current, out Vector3 palmRight, out Vector3 palmNormal, out string layoutName))
+        {
+            rig.proximalSpreadDebug = "spread: source unavailable";
+            rig.proximalSpreadPalmNormal = Vector3.zero;
+            return Vector4.zero;
+        }
+        rig.proximalSpreadPalmNormal = palmNormal;
+
+        if (!_openProximalSpreadComponents.TryGetValue(rig, out Vector4 open))
+        {
+            open = rig.autoCalibrateProximalSpreadOpenPose ? current : Vector4.zero;
+            _openProximalSpreadComponents[rig] = open;
+            _openProximalSpreadPalmRights[rig] = palmRight;
+            _openProximalSpreadPalmNormals[rig] = palmNormal;
+        }
+
+        float handSign =
+            (rig.isLeft && rig.mirrorLeftProximalSpread) ||
+            (!rig.isLeft && rig.mirrorRightProximalSpread)
+                ? -1f
+                : 1f;
+        Vector4 delta = (current - open) * rig.proximalSpreadDirection * handSign;
+        float scale = Mathf.Max(1f, rig.proximalSpreadInputScale);
+        Vector4 fingerScale = NormalizeSpreadFingerScale(rig.proximalSpreadFingerScale);
+        delta.x = ApplyDeadZone(Mathf.Clamp(delta.x * scale * fingerScale.x + rig.proximalSpreadInputOffset.x, -1f, 1f), rig.proximalSpreadDeadZone);
+        delta.y = ApplyDeadZone(Mathf.Clamp(delta.y * scale * fingerScale.y + rig.proximalSpreadInputOffset.y, -1f, 1f), rig.proximalSpreadDeadZone);
+        delta.z = ApplyDeadZone(Mathf.Clamp(delta.z * scale * fingerScale.z + rig.proximalSpreadInputOffset.z, -1f, 1f), rig.proximalSpreadDeadZone);
+        delta.w = ApplyDeadZone(Mathf.Clamp(delta.w * scale * fingerScale.w + rig.proximalSpreadInputOffset.w, -1f, 1f), rig.proximalSpreadDeadZone);
+
+        rig.proximalSpreadDebug =
+            $"{layoutName} current {current.x:0.00}/{current.y:0.00}/{current.z:0.00}/{current.w:0.00} " +
+            $"open {open.x:0.00}/{open.y:0.00}/{open.z:0.00}/{open.w:0.00} " +
+            $"axis {rig.proximalSpreadPalmNormal.x:0.00}/{rig.proximalSpreadPalmNormal.y:0.00}/{rig.proximalSpreadPalmNormal.z:0.00} " +
+            $"sign {handSign:0}";
+        return delta;
+    }
+
+    Vector3 GetWristFixedProximalSpreadPalmNormal(HandRig rig, Vector3 currentPalmNormal)
+    {
+        if (rig == null)
+            return currentPalmNormal;
+
+        if (!_openProximalSpreadPalmNormals.TryGetValue(rig, out Vector3 fixedPalmNormal) ||
+            fixedPalmNormal.sqrMagnitude < 1e-6f)
+        {
+            fixedPalmNormal = currentPalmNormal;
+            _openProximalSpreadPalmNormals[rig] = fixedPalmNormal;
+        }
+
+        if (fixedPalmNormal.sqrMagnitude < 1e-6f)
+            fixedPalmNormal = rig.proximalSpreadAxis.sqrMagnitude > 1e-6f
+                ? rig.proximalSpreadAxis.normalized
+                : Vector3.up;
+        else
+            fixedPalmNormal.Normalize();
+
+        return rig.invertProximalSpreadPalmAxis ? -fixedPalmNormal : fixedPalmNormal;
+    }
+
+    static Vector4 NormalizeSpreadFingerScale(Vector4 scale)
+    {
+        if (scale == Vector4.zero)
+            return Vector4.one;
+
+        scale.x = Mathf.Approximately(scale.x, 0f) ? 1f : scale.x;
+        scale.y = Mathf.Approximately(scale.y, 0f) ? 1f : scale.y;
+        scale.z = Mathf.Approximately(scale.z, 0f) ? 1f : scale.z;
+        scale.w = Mathf.Approximately(scale.w, 0f) ? 1f : scale.w;
+        return scale;
+    }
+
+    bool TryGetProximalSpreadComponents(Pose[] poses, out Vector4 components)
+    {
+        return TryGetProximalSpreadComponents(null, poses, out components, out _, out _, out _);
+    }
+
+    bool TryGetProximalSpreadComponents(
+        HandRig rig,
+        Pose[] poses,
+        out Vector4 components,
+        out Vector3 palmRight,
+        out Vector3 palmNormal,
+        out string layoutName)
+    {
+        components = Vector4.zero;
+        palmRight = Vector3.zero;
+        palmNormal = Vector3.zero;
+        layoutName = "";
+        if (!TryGetJointPoseLayout(poses, out JointPoseLayout layout))
+            return false;
+        layoutName = layout.name;
+
+        Vector3 wrist = poses[layout.wrist].position;
+        Vector3 indexBase = poses[layout.indexBase].position;
+        Vector3 middleBase = poses[layout.middleBase].position;
+        Vector3 littleBase = poses[layout.littleBase].position;
+
+        palmRight = indexBase - littleBase;
+        Vector3 palmForward = middleBase - wrist;
+        if (palmRight.sqrMagnitude < 1e-8f || palmForward.sqrMagnitude < 1e-8f)
+            return false;
+
+        palmRight.Normalize();
+        palmForward = Vector3.ProjectOnPlane(palmForward, palmRight);
+        if (palmForward.sqrMagnitude < 1e-8f)
+            return false;
+        palmForward.Normalize();
+
+        palmNormal = Vector3.Cross(palmRight, palmForward);
+        if (palmNormal.sqrMagnitude < 1e-8f)
+            return false;
+        palmNormal.Normalize();
+        // Do not stabilize palmRight against the open pose in world space.
+        // A wrist roll / palm flip legitimately rotates palmRight in world space,
+        // and forcing it back to the open-pose world direction makes spread input invert.
+
+        // Use the first finger segment for spread estimation.  Tip-based vectors
+        // become noisy when the hand is a fist because fingertips are occluded and
+        // folded into the palm, which can feed jitter back into proximal spread.
+        if (!TryGetPalmRightComponent(poses, layout.indexBase, layout.index2, palmRight, out float index) ||
+            !TryGetPalmRightComponent(poses, layout.middleBase, layout.middle2, palmRight, out float middle) ||
+            !TryGetPalmRightComponent(poses, layout.ringBase, layout.ring2, palmRight, out float ring) ||
+            !TryGetPalmRightComponent(poses, layout.littleBase, layout.little2, palmRight, out float little))
+            return false;
+
+        components = new Vector4(index, middle, ring, little);
+        return true;
+    }
+
+    void StabilizeProximalSpreadPalmRight(HandRig rig, ref Vector3 palmRight)
+    {
+        if (rig == null)
+            return;
+
+        if (_openProximalSpreadPalmRights.TryGetValue(rig, out Vector3 openPalmRight) &&
+            openPalmRight.sqrMagnitude > 1e-6f &&
+            Vector3.Dot(palmRight, openPalmRight) < 0f)
+        {
+            palmRight = -palmRight;
+        }
+    }
+
+    static bool TryGetPalmRightComponent(Pose[] poses, int from, int to, Vector3 palmRight, out float component)
+    {
+        component = 0f;
+        Vector3 direction = poses[to].position - poses[from].position;
+        if (direction.sqrMagnitude < 1e-8f)
+            return false;
+
+        direction.Normalize();
+        component = Vector3.Dot(direction, palmRight);
         return true;
     }
 
@@ -954,15 +1539,15 @@ public class AvatarHandTrackingDriver : MonoBehaviour
     bool TryGetThumbPalmComponents(Pose[] poses, out Vector3 components)
     {
         components = Vector3.zero;
-        if (poses == null || poses.Length < 26)
+        if (!TryGetJointPoseLayout(poses, out JointPoseLayout layout))
             return false;
 
-        Vector3 wrist = poses[1].position;
-        Vector3 indexBase = poses[6].position;
-        Vector3 littleBase = poses[21].position;
-        Vector3 middleBase = poses[11].position;
-        Vector3 thumbBase = poses[2].position;
-        Vector3 thumbTip = poses[5].position;
+        Vector3 wrist = poses[layout.wrist].position;
+        Vector3 indexBase = poses[layout.indexBase].position;
+        Vector3 littleBase = poses[layout.littleBase].position;
+        Vector3 middleBase = poses[layout.middleBase].position;
+        Vector3 thumbBase = poses[layout.thumb0].position;
+        Vector3 thumbTip = poses[layout.thumbTip].position;
 
         Vector3 palmRight = indexBase - littleBase;
         Vector3 palmForward = middleBase - wrist;
@@ -1059,13 +1644,13 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         return 0f;
     }
 
-    void ApplyFingerCurl(HandRig rig, Transform proximal, Transform intermediate, Transform distal, float curl, float weight, float openExtensionDegrees)
+    void ApplyFingerCurl(HandRig rig, Transform proximal, Transform intermediate, Transform distal, float curl, float weight, float openExtensionDegrees, float proximalSpreadDegrees)
     {
         float openExtension = openExtensionDegrees * (1f - Mathf.Clamp01(curl));
         float extensionSign = GetRightMirrorSign(rig, rig.mirrorRightOpenExtension);
-        ApplyLocalCurl(rig, proximal, curl * 78f, weight, openExtension, extensionSign);
-        ApplyLocalCurl(rig, intermediate, curl * 96f, weight, openExtension, extensionSign);
-        ApplyLocalCurl(rig, distal, curl * 65f * rig.distalCurlMultiplier, weight, openExtension, extensionSign);
+        ApplyLocalCurl(rig, proximal, curl * 78f, weight, openExtension, extensionSign, proximalSpreadDegrees);
+        ApplyLocalCurl(rig, intermediate, curl * 96f, weight, openExtension, extensionSign, 0f);
+        ApplyLocalCurl(rig, distal, curl * 65f * rig.distalCurlMultiplier, weight, openExtension, extensionSign, 0f);
     }
 
     void ApplyThumbCurl(HandRig rig, float curl, float weight)
@@ -1099,7 +1684,7 @@ public class AvatarHandTrackingDriver : MonoBehaviour
             false);
     }
 
-    void ApplyLocalCurl(HandRig rig, Transform bone, float degrees, float weight, float openExtensionDegrees, float extensionSign)
+    void ApplyLocalCurl(HandRig rig, Transform bone, float degrees, float weight, float openExtensionDegrees, float extensionSign, float spreadDegrees)
     {
         if (bone == null)
             return;
@@ -1113,8 +1698,147 @@ public class AvatarHandTrackingDriver : MonoBehaviour
         Vector3 axis = rig.fingerCurlAxis.sqrMagnitude > 1e-6f ? rig.fingerCurlAxis.normalized : Vector3.right;
         float correctedDegrees = degrees - openExtensionDegrees * extensionSign;
         Quaternion curlRotation = Quaternion.AngleAxis(correctedDegrees * rig.fingerCurlDirection, axis);
-        Quaternion desired = open * curlRotation;
+        Quaternion spreadRotation = GetPalmNormalSpreadRotation(rig, bone, spreadDegrees * rig.proximalSpreadWeight);
+        Quaternion desired = spreadRotation * open * curlRotation;
         bone.localRotation = Quaternion.Slerp(bone.localRotation, desired, weight);
+    }
+
+    Quaternion GetPalmNormalSpreadRotation(HandRig rig, Transform bone, float spreadDegrees)
+    {
+        if (Mathf.Approximately(spreadDegrees, 0f))
+            return Quaternion.identity;
+
+        if (!TryGetProximalSpreadWorldAxis(rig, bone, out Vector3 worldAxis))
+            return Quaternion.identity;
+
+        Quaternion worldRotation = Quaternion.AngleAxis(spreadDegrees, worldAxis);
+        Quaternion parentRotation = bone.parent != null ? bone.parent.rotation : Quaternion.identity;
+        return Quaternion.Inverse(parentRotation) * worldRotation * parentRotation;
+    }
+
+    bool TryGetProximalSpreadWorldAxis(HandRig rig, Transform bone, out Vector3 worldAxis)
+    {
+        worldAxis = Vector3.zero;
+        if (bone == null)
+            return false;
+
+        if (rig != null && rig.hand != null)
+        {
+            if (!_avatarProximalSpreadAxisLocal.TryGetValue(rig, out Vector3 localAxis) || localAxis.sqrMagnitude < 1e-6f)
+            {
+                CaptureAvatarProximalSpreadAxisLocal(rig);
+                _avatarProximalSpreadAxisLocal.TryGetValue(rig, out localAxis);
+            }
+
+            if (localAxis.sqrMagnitude > 1e-6f)
+                worldAxis = rig.hand.rotation * localAxis.normalized;
+        }
+
+        if (worldAxis.sqrMagnitude < 1e-6f && TryComputeAvatarPalmNormalWorld(rig, out Vector3 palmNormal))
+            worldAxis = palmNormal;
+
+        if (worldAxis.sqrMagnitude < 1e-6f && rig != null && rig.hand != null)
+        {
+            Vector3 fallbackAxis = rig.proximalSpreadAxis.sqrMagnitude > 1e-6f
+                ? rig.proximalSpreadAxis.normalized
+                : Vector3.up;
+            worldAxis = rig.hand.rotation * fallbackAxis;
+        }
+
+        if (worldAxis.sqrMagnitude < 1e-6f)
+            return false;
+
+        worldAxis.Normalize();
+        if (rig != null && rig.invertProximalSpreadPalmAxis)
+            worldAxis = -worldAxis;
+
+        // Safety guard: abduction/adduction at the finger root must rotate around
+        // a palm-normal-like axis, not around the finger's length axis.  If the
+        // imported rig's local axes or an unlucky fallback makes the axis almost
+        // parallel to the finger, project it away from the finger direction.
+        if (TryGetFingerWorldDirection(bone, out Vector3 fingerDirection))
+        {
+            Vector3 correctedAxis = Vector3.ProjectOnPlane(worldAxis, fingerDirection);
+            if (correctedAxis.sqrMagnitude < 1e-6f && TryGetAvatarPalmRightWorld(rig, out Vector3 palmRight))
+                correctedAxis = Vector3.Cross(palmRight, fingerDirection);
+            if (correctedAxis.sqrMagnitude < 1e-6f && rig != null && rig.hand != null)
+                correctedAxis = Vector3.Cross(rig.hand.right, fingerDirection);
+            if (correctedAxis.sqrMagnitude > 1e-6f)
+                worldAxis = correctedAxis.normalized;
+        }
+
+        return worldAxis.sqrMagnitude > 1e-6f;
+    }
+
+    void CaptureAvatarProximalSpreadAxisLocal(HandRig rig)
+    {
+        if (rig == null || rig.hand == null)
+            return;
+
+        if (!TryComputeAvatarPalmNormalWorld(rig, out Vector3 worldAxis))
+            return;
+
+        Vector3 localAxis = Quaternion.Inverse(rig.hand.rotation) * worldAxis.normalized;
+        if (localAxis.sqrMagnitude > 1e-6f)
+            _avatarProximalSpreadAxisLocal[rig] = localAxis.normalized;
+    }
+
+    bool TryComputeAvatarPalmNormalWorld(HandRig rig, out Vector3 palmNormal)
+    {
+        palmNormal = Vector3.zero;
+        if (rig == null)
+            return false;
+
+        if (!TryGetAvatarPalmRightWorld(rig, out Vector3 palmRight))
+            return false;
+
+        Vector3 palmForward = Vector3.zero;
+        if (TryGetFingerWorldDirection(rig.middleProximal, out Vector3 middleDirection))
+            palmForward = middleDirection;
+        else if (rig.hand != null && rig.middleProximal != null)
+            palmForward = rig.middleProximal.position - rig.hand.position;
+
+        if (palmForward.sqrMagnitude < 1e-6f)
+            return false;
+
+        palmRight.Normalize();
+        palmForward = Vector3.ProjectOnPlane(palmForward, palmRight);
+        if (palmForward.sqrMagnitude < 1e-6f)
+            return false;
+        palmForward.Normalize();
+
+        palmNormal = Vector3.Cross(palmRight, palmForward);
+        if (palmNormal.sqrMagnitude < 1e-6f)
+            return false;
+
+        palmNormal.Normalize();
+        return true;
+    }
+
+    bool TryGetAvatarPalmRightWorld(HandRig rig, out Vector3 palmRight)
+    {
+        palmRight = Vector3.zero;
+        if (rig == null || rig.indexProximal == null || rig.littleProximal == null)
+            return false;
+
+        palmRight = rig.indexProximal.position - rig.littleProximal.position;
+        return palmRight.sqrMagnitude > 1e-6f;
+    }
+
+    bool TryGetFingerWorldDirection(Transform proximal, out Vector3 direction)
+    {
+        direction = Vector3.zero;
+        if (proximal == null)
+            return false;
+
+        Transform child = proximal.childCount > 0 ? proximal.GetChild(0) : null;
+        if (child != null)
+            direction = child.position - proximal.position;
+
+        if (direction.sqrMagnitude < 1e-6f)
+            direction = proximal.rotation * Vector3.forward;
+
+        return direction.sqrMagnitude > 1e-6f;
     }
 
     void ApplyLocalThumbCurl(
@@ -1172,7 +1896,12 @@ public class AvatarHandTrackingDriver : MonoBehaviour
 
     void CaptureFingerBindPose(HandRig rig)
     {
-        if (rig == null || rig.ovrSkeleton == null)
+        if (rig == null)
+            return;
+
+        CaptureAvatarProximalSpreadAxisLocal(rig);
+
+        if (rig.ovrSkeleton == null)
             return;
 
         AddFingerBind(rig, OVRSkeleton.BoneId.Hand_Thumb1, rig.thumbProximal);

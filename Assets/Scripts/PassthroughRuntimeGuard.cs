@@ -49,7 +49,7 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
             created = true;
         }
 
-        ApplyHandLocalScaniverseRuntimeDefaults(occlusion);
+        ApplyHandLocalScaniverseRuntimeDefaults(occlusion, created);
         occlusion.enabled = true;
         occlusion.RebuildOverlay();
 
@@ -59,7 +59,7 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
             Debug.Log($"{LogPrefix} Re-applied HandLocalScaniverseOcclusion runtime defaults.");
     }
 
-    private static void ApplyHandLocalScaniverseRuntimeDefaults(HandLocalScaniverseOcclusion occlusion)
+    private static void ApplyHandLocalScaniverseRuntimeDefaults(HandLocalScaniverseOcclusion occlusion, bool created)
     {
         if (occlusion == null)
             return;
@@ -74,6 +74,22 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         occlusion.anchorPlacer = FindFirstObjectByType<ManualSpatialAnchorPlacer>();
         occlusion.deskBinder = FindFirstObjectByType<SpatialAnchorToDeskOriginBinder>();
         occlusion.preferGoGoOriginalHandSources = true;
+        occlusion.avatarHandDriver = FindFirstObjectByType<AvatarHandTrackingDriver>();
+        if (created)
+        {
+            occlusion.enableForearmBoxMask = true;
+            occlusion.autoFindAvatarHandDriver = true;
+            occlusion.useAvatarCapturedForearmDirection = false;
+            occlusion.useIndexTipDirectionForForearmMask = true;
+            occlusion.leftForearmMaskWristLocalDirection = Vector3.down;
+            occlusion.rightForearmMaskWristLocalDirection = Vector3.down;
+            occlusion.defaultForearmLengthMeters = 0.25f;
+            occlusion.defaultWristToElbowLocalDirection = Vector3.back;
+            occlusion.forearmBoxHalfWidthMeters = 0.3f;
+            occlusion.forearmBoxHalfHeightMeters = 0.3f;
+            occlusion.forearmBoxFeatherMeters = 0.07f;
+            occlusion.forearmBoxDepthBiasMeters = 0.02f;
+        }
         occlusion.autoFindObjectOriginalMaskPoints = true;
         occlusion.maxObjectMaskPoints = 16;
         occlusion.overlayRenderQueue = 3000;
