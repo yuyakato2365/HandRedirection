@@ -4,6 +4,10 @@ using UnityEngine;
 public sealed class PassthroughRuntimeGuard : MonoBehaviour
 {
     private const string LogPrefix = "[PassthroughRuntimeGuard]";
+    private static readonly string[] ActiveScaniverseRootNames =
+    {
+        "Scaniverse 2026-05-20 114107"
+    };
 
     private IEnumerator Start()
     {
@@ -65,8 +69,12 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
             return;
 
         occlusion.autoFindScaniverseRoots = true;
+        occlusion.scaniverseRoots = null;
+        occlusion.scaniverseRenderers = null;
+        occlusion.autoFindNameContains = ActiveScaniverseRootNames;
         occlusion.onlyApplyOverlayToNamedRootChildren = true;
         occlusion.scaniverseMeshRootNameEquals = new[] { "Root", "root" };
+        occlusion.respectInactiveScaniverseRoots = true;
         occlusion.enableNonSelectedChildrenUnderScaniverseRoots = true;
         occlusion.doNotAutoEnableNameEquals = new[] { "Root", "root" };
         occlusion.autoFindHands = true;

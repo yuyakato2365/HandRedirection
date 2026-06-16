@@ -16,6 +16,7 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
     public string[] excludeRendererNameContains = new string[0];
     public bool onlyApplyOverlayToNamedRootChildren = true;
     public string[] scaniverseMeshRootNameEquals = { "Root", "root" };
+    public bool respectInactiveScaniverseRoots = true;
 
     [Header("Scaniverse Child Activation")]
     public bool enableNonSelectedChildrenUnderScaniverseRoots = true;
@@ -285,6 +286,8 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
             Transform root = roots[rootIndex];
             if (root == null)
                 continue;
+            if (respectInactiveScaniverseRoots && !root.gameObject.activeInHierarchy)
+                continue;
 
             MeshRenderer[] renderers = root.GetComponentsInChildren<MeshRenderer>(true);
             for (int i = 0; i < renderers.Length; i++)
@@ -346,6 +349,8 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
         {
             Transform scaniverseRoot = roots[rootIndex];
             if (scaniverseRoot == null)
+                continue;
+            if (respectInactiveScaniverseRoots && !scaniverseRoot.gameObject.activeInHierarchy)
                 continue;
 
             Transform[] children = scaniverseRoot.GetComponentsInChildren<Transform>(true);
@@ -635,6 +640,9 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
                 best = current;
             current = current.parent;
         }
+
+        if (respectInactiveScaniverseRoots && best != null && !best.gameObject.activeInHierarchy)
+            return null;
 
         return best;
     }
