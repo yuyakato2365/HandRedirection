@@ -85,6 +85,10 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     [Header("Object-local mapping (G) / Blend")]
     public bool useSurfaceDistanceForBlend = true;
     public bool blendDistanceIncludeY = true;
+    [Tooltip("Keep off when only the VR visual should grow. If on, the blend/recognition surface grows with the warped visual scale.")]
+    public bool scaleBlendSurfaceByCommittedRatio = false;
+    [Tooltip("Continuously sync the object-local hand mapping ratio from the current warped visual scale, including while the object is being stretched.")]
+    public bool syncCommittedRatioFromWarpedScale = true;
     public float nearRadius = 0.12f;
     public float farRadius = 0.30f;
 
@@ -145,6 +149,7 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         }
 
         RefreshAutoScaledBaseHalfExtents();
+        RefreshCommittedRatiosFromWarpedScales();
         EnsureAllWarpedObjectsDetached();
         UpdateAllWarpedObjectVisuals();
 
@@ -162,6 +167,16 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         List<WarpObjectEntry> active = EnumerateActiveEntries();
         for (int i = 0; i < active.Count; i++)
             ApplyAutoScaledBaseHalfExtents(active[i]);
+    }
+
+    void RefreshCommittedRatiosFromWarpedScales()
+    {
+        if (!syncCommittedRatioFromWarpedScale)
+            return;
+
+        List<WarpObjectEntry> active = EnumerateActiveEntries();
+        for (int i = 0; i < active.Count; i++)
+            RefreshCommittedRatioFromWarpedScale(active[i]);
     }
 
     Transform GetWarpOrigin()
@@ -285,11 +300,24 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     {
         if (entry == null || !entry.baseScaleInitialized) return;
 
+        entry.committedRatio = ComputeWarpedScaleRatio(entry, currentLocalScale);
+    }
+
+    void RefreshCommittedRatioFromWarpedScale(WarpObjectEntry entry)
+    {
+        if (entry == null || entry.warpedObject == null || !entry.baseScaleInitialized)
+            return;
+
+        entry.committedRatio = ComputeWarpedScaleRatio(entry, entry.warpedObject.localScale);
+    }
+
+    static Vector3 ComputeWarpedScaleRatio(WarpObjectEntry entry, Vector3 currentLocalScale)
+    {
         float bx = Mathf.Abs(entry.baseWarpedScale.x) < 1e-6f ? 1e-6f : entry.baseWarpedScale.x;
         float by = Mathf.Abs(entry.baseWarpedScale.y) < 1e-6f ? 1e-6f : entry.baseWarpedScale.y;
         float bz = Mathf.Abs(entry.baseWarpedScale.z) < 1e-6f ? 1e-6f : entry.baseWarpedScale.z;
 
-        entry.committedRatio = new Vector3(
+        return new Vector3(
             currentLocalScale.x / bx,
             currentLocalScale.y / by,
             currentLocalScale.z / bz
@@ -649,9 +677,10 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         if (!useSurfaceDistanceForBlend)
             return Mathf.Sqrt(ax * ax + ay * ay + az * az);
 
-        float hx = (halfExtents.x + sideRangeMargin) * ratio.x;
-        float hy = (halfExtents.y + sideRangeMargin) * ratio.y;
-        float hz = (halfExtents.z + sideRangeMargin) * ratio.z;
+        Vector3 blendRatio = scaleBlendSurfaceByCommittedRatio ? ratio : Vector3.one;
+        float hx = (halfExtents.x + sideRangeMargin) * blendRatio.x;
+        float hy = (halfExtents.y + sideRangeMargin) * blendRatio.y;
+        float hz = (halfExtents.z + sideRangeMargin) * blendRatio.z;
 
         float ex = Mathf.Max(ax - hx, 0f);
         float ey = blendDistanceIncludeY ? Mathf.Max(ay - hy, 0f) : 0f;
