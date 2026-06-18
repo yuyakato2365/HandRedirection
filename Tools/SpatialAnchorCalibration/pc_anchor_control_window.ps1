@@ -73,7 +73,7 @@ function Poll-Status {
 
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = "Spatial Anchor Calibration Control"
-$form.Size = [System.Drawing.Size]::new(560, 834)
+$form.Size = [System.Drawing.Size]::new(560, 878)
 $form.StartPosition = "CenterScreen"
 
 $ipLabel = [System.Windows.Forms.Label]::new()
@@ -244,9 +244,27 @@ $disableButton.Add_Click({
 })
 $form.Controls.Add($disableButton)
 
+$diminishedRealityButton = [System.Windows.Forms.Button]::new()
+$diminishedRealityButton.Text = "Diminished Reality"
+$diminishedRealityButton.Location = [System.Drawing.Point]::new(16, 502)
+$diminishedRealityButton.Size = [System.Drawing.Size]::new(248, 34)
+$diminishedRealityButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "USE_DIMINISHED_REALITY"
+})
+$form.Controls.Add($diminishedRealityButton)
+
+$scaledScaniverseButton = [System.Windows.Forms.Button]::new()
+$scaledScaniverseButton.Text = "Scaled Scaniverse"
+$scaledScaniverseButton.Location = [System.Drawing.Point]::new(278, 502)
+$scaledScaniverseButton.Size = [System.Drawing.Size]::new(248, 34)
+$scaledScaniverseButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "USE_SCALED_SCANIVERSE_ROOM"
+})
+$form.Controls.Add($scaledScaniverseButton)
+
 $setRedirectionOriginButton = [System.Windows.Forms.Button]::new()
 $setRedirectionOriginButton.Text = "Set Redirection Origin"
-$setRedirectionOriginButton.Location = [System.Drawing.Point]::new(16, 502)
+$setRedirectionOriginButton.Location = [System.Drawing.Point]::new(16, 546)
 $setRedirectionOriginButton.Size = [System.Drawing.Size]::new(510, 34)
 $setRedirectionOriginButton.Add_Click({
     Send-QuestCommand $ipBox.Text "REARM_RIGHT_PINCH_REDIRECTION_ORIGIN"
@@ -255,7 +273,7 @@ $form.Controls.Add($setRedirectionOriginButton)
 
 $resetRedirectionOriginButton = [System.Windows.Forms.Button]::new()
 $resetRedirectionOriginButton.Text = "Reset Redirection Origin"
-$resetRedirectionOriginButton.Location = [System.Drawing.Point]::new(16, 546)
+$resetRedirectionOriginButton.Location = [System.Drawing.Point]::new(16, 590)
 $resetRedirectionOriginButton.Size = [System.Drawing.Size]::new(510, 34)
 $resetRedirectionOriginButton.Add_Click({
     Send-QuestCommand $ipBox.Text "RESET_REDIRECTION_ORIGIN_TO_DESK"
@@ -264,21 +282,21 @@ $form.Controls.Add($resetRedirectionOriginButton)
 
 $nextParticipantButton = [System.Windows.Forms.Button]::new()
 $nextParticipantButton.Text = "Next Participant / Reset Objects"
-$nextParticipantButton.Location = [System.Drawing.Point]::new(16, 590)
+$nextParticipantButton.Location = [System.Drawing.Point]::new(16, 634)
 $nextParticipantButton.Size = [System.Drawing.Size]::new(510, 34)
 $nextParticipantButton.Add_Click({
     Send-QuestCommand $ipBox.Text "RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT"
 })
 $form.Controls.Add($nextParticipantButton)
 
-$statusTitle.Location = [System.Drawing.Point]::new(16, 640)
+$statusTitle.Location = [System.Drawing.Point]::new(16, 684)
 $statusTitle.Size = [System.Drawing.Size]::new(80, 24)
 $form.Controls.Add($statusTitle)
 
 $statusLabel = [System.Windows.Forms.Label]::new()
 $statusLabel.Text = "Waiting for status"
 $statusLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D
-$statusLabel.Location = [System.Drawing.Point]::new(16, 666)
+$statusLabel.Location = [System.Drawing.Point]::new(16, 710)
 $statusLabel.Size = [System.Drawing.Size]::new(510, 28)
 $form.Controls.Add($statusLabel)
 
@@ -286,7 +304,7 @@ $logBox = [System.Windows.Forms.TextBox]::new()
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
-$logBox.Location = [System.Drawing.Point]::new(16, 706)
+$logBox.Location = [System.Drawing.Point]::new(16, 750)
 $logBox.Size = [System.Drawing.Size]::new(510, 72)
 $form.Controls.Add($logBox)
 

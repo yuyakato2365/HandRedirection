@@ -16,6 +16,7 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
     public string[] excludeRendererNameContains = new string[0];
     public bool onlyApplyOverlayToNamedRootChildren = true;
     public string[] scaniverseMeshRootNameEquals = { "Root", "root" };
+    public string[] fullRootOverlayNameContains = new string[0];
     public bool respectInactiveScaniverseRoots = true;
 
     [Header("Scaniverse Child Activation")]
@@ -79,7 +80,7 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
     public bool hideOriginalScaniverseRenderers = true;
 
     [Header("Render Order")]
-    public int overlayRenderQueue = 3000;
+    public int overlayRenderQueue = 2000;
     public string overlayLayerName = "";
 
     [Header("Generated Cache Cleanup")]
@@ -668,7 +669,7 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
         if (renderer == null || IsExcludedRenderer(renderer))
             return false;
 
-        if (onlyApplyOverlayToNamedRootChildren && !IsUnderNamedRootChild(renderer.transform, scaniverseRoot))
+        if (onlyApplyOverlayToNamedRootChildren && !NameMatchesAny(scaniverseRoot.name, fullRootOverlayNameContains) && !IsUnderNamedRootChild(renderer.transform, scaniverseRoot))
             return false;
 
         if (includeRendererNameContains != null && includeRendererNameContains.Length > 0)

@@ -21,6 +21,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
     public ManualSpatialAnchorPlacer placer;
     public SpatialAnchorToDeskOriginBinder deskBinder;
     public SpatialAnchorRedirectionToggle featureToggle;
+    public PassthroughScaniverseModeController passthroughScaniverseModeController;
 
     [Header("Exhibition Reset")]
     public ExhibitionExperienceResetter experienceResetter;
@@ -43,6 +44,8 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
         if (featureToggle == null)
             featureToggle = FindAnyObjectByType<SpatialAnchorRedirectionToggle>();
+        if (passthroughScaniverseModeController == null)
+            passthroughScaniverseModeController = FindAnyObjectByType<PassthroughScaniverseModeController>();
         EnsureExperienceResetter();
     }
 
@@ -330,6 +333,33 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                     SendStatus("ERROR toggle_not_assigned");
                 }
                 break;
+            case "USE_DIMINISHED_REALITY":
+            case "USE_PASSTHROUGH_DIMINISHED_REALITY":
+            case "PASSTHROUGH_DIMINISHED_REALITY":
+                if (TryGetPassthroughScaniverseModeController(out PassthroughScaniverseModeController diminishedController))
+                {
+                    diminishedController.UseDiminishedRealityMode();
+                    SendStatus("PASSTHROUGH_SCANIVERSE_MODE diminished_reality");
+                }
+                break;
+            case "USE_SCALED_SCANIVERSE":
+            case "USE_SCALED_SCANIVERSE_ROOM":
+            case "USE_SCANIVERSE_ROOM_DEFORMATION":
+            case "PASSTHROUGH_SCALED_SCANIVERSE":
+                if (TryGetPassthroughScaniverseModeController(out PassthroughScaniverseModeController scaledController))
+                {
+                    scaledController.UseScaledScaniverseRoomMode();
+                    SendStatus("PASSTHROUGH_SCANIVERSE_MODE scaled_scaniverse_room");
+                }
+                break;
+            case "TOGGLE_PASSTHROUGH_SCANIVERSE_MODE":
+            case "TOGGLE_DIMINISHED_REALITY":
+                if (TryGetPassthroughScaniverseModeController(out PassthroughScaniverseModeController toggleController))
+                {
+                    toggleController.ToggleMode();
+                    SendStatus($"PASSTHROUGH_SCANIVERSE_MODE {toggleController.CurrentMode}");
+                }
+                break;
             case "NEXT_PARTICIPANT":
             case "RESET_FOR_NEXT_PARTICIPANT":
             case "RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT":
@@ -398,6 +428,23 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
 
         GameObject resetterObject = new GameObject("ExhibitionExperienceResetter");
         experienceResetter = resetterObject.AddComponent<ExhibitionExperienceResetter>();
+    }
+
+    private bool TryGetPassthroughScaniverseModeController(out PassthroughScaniverseModeController controller)
+    {
+        controller = passthroughScaniverseModeController != null
+            ? passthroughScaniverseModeController
+            : FindAnyObjectByType<PassthroughScaniverseModeController>();
+        if (controller != null)
+        {
+            passthroughScaniverseModeController = controller;
+            return true;
+        }
+
+        GameObject obj = new GameObject("PassthroughScaniverseModeController");
+        controller = obj.AddComponent<PassthroughScaniverseModeController>();
+        passthroughScaniverseModeController = controller;
+        return true;
     }
 
     private int ResetExperienceForNextParticipant()

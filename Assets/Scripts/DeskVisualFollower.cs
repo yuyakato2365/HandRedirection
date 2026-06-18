@@ -10,6 +10,8 @@ public class DeskVisualFollower : MonoBehaviour
     [Header("Edit / Play Follow")]
     public bool followInEditMode = true;
     public bool followInPlayMode = true;
+    [Tooltip("When Play starts, use the current scene transform as the offset before following DeskOrigin. This preserves manual scene placement while still following runtime desk alignment.")]
+    public bool recaptureOffsetOnPlayStart = true;
 
     [Header("Offset In Desk Space")]
     public Vector3 localPositionOffset = Vector3.zero;
@@ -18,6 +20,13 @@ public class DeskVisualFollower : MonoBehaviour
     [Header("Scale")]
     public bool applyLocalScale = false;
     public Vector3 localScaleOverride = Vector3.one;
+
+    private bool recapturedOffsetForThisPlay;
+
+    private void OnEnable()
+    {
+        recapturedOffsetForThisPlay = false;
+    }
 
     private void Update()
     {
@@ -28,6 +37,12 @@ public class DeskVisualFollower : MonoBehaviour
         {
             if (!followInPlayMode)
                 return;
+
+            if (recaptureOffsetOnPlayStart && !recapturedOffsetForThisPlay)
+            {
+                CaptureCurrentTransformAsOffset();
+                recapturedOffsetForThisPlay = true;
+            }
         }
         else
         {

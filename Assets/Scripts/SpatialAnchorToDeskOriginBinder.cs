@@ -1643,7 +1643,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         for (int i = 0; i < renderers.Length; i++)
         {
             Renderer renderer = renderers[i];
-            if (renderer == null)
+            if (renderer == null || IsScaniverseRenderer(renderer))
                 continue;
 
             Material[] materials = renderer.sharedMaterials;
@@ -1698,6 +1698,23 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         {
             if (transparentMaterialStates[i].material == material)
                 return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsScaniverseRenderer(Renderer renderer)
+    {
+        if (renderer == null)
+            return true;
+
+        Transform current = renderer.transform;
+        while (current != null)
+        {
+            if (current.name.Contains("Scaniverse"))
+                return true;
+
+            current = current.parent;
         }
 
         return false;

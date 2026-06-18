@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -9,6 +10,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
         public Transform target;
         public Vector3 initialLocalScale = Vector3.zero;
         public Vector3 initialLocalPosition = Vector3.zero;
+        public Quaternion initialLocalRotation = Quaternion.identity;
         public Vector3 initialLocalBoundsMin = Vector3.zero;
         public Vector3 initialLocalBoundsMax = Vector3.zero;
         public bool hasInitialLocalBounds;
@@ -22,17 +24,32 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
     [Header("Scaled Scene Objects")]
     public bool autoFindScaniverseMinitable = true;
-    public string scaniverseRootName = "Scaniverse 2026-05-20 114107";
+    public string scaniverseRootName = "Scaniverse 2026-06-17 213301";
     public string minitableName = "minitable";
-    [Tooltip("Scene objects keep their captured size at this desk scale. Use 2 when the original desk size should be treated as 2x.")]
-    public float sceneObjectReferenceScale = 2f;
+    [Tooltip("Scene objects keep their captured size at this desk scale. Use 1 when the manually placed desk is the baseline size.")]
+    public float sceneObjectReferenceScale = 1f;
+    [Tooltip("Use the current scene transform as the scale baseline when Play starts. This preserves manual desk placement.")]
+    public bool recaptureSceneObjectBaselineOnStart = true;
+    [Tooltip("If enabled, the current scale is applied to scene objects immediately on Play start. Leave off to avoid moving a manually placed desk.")]
+    public bool applySceneObjectScaleOnStart = false;
     [Tooltip("Scales scene objects around the edge nearest the seated person instead of around their pivot.")]
     public bool keepSeatedSideEdgeFixed = true;
+    [Tooltip("Choose the fixed edge from the edge nearest RedirectionOrigin. If RedirectionOrigin is missing, seatedSideLocalDirection is used as a fallback.")]
+    public bool chooseFixedEdgeFromRedirectionOrigin = true;
     [Tooltip("Seated-side edge in the scaled object's local space. Default -Z means the object grows toward local +Z.")]
     public Vector3 seatedSideLocalDirection = Vector3.back;
     [Tooltip("Do not scale scene object height when desk scale changes.")]
     public bool keepSceneObjectHeight = true;
     public ScaledObject[] scaledObjects = new ScaledObject[0];
+
+    [Header("Scaniverse Partial Deformation")]
+    [Tooltip("Deforms the Scaniverse room continuously from the desk footprint so the scaled area stays connected to the surrounding mesh.")]
+    public bool deformScaniverseRoomWithDeskScale = true;
+    [Tooltip("Expand the desk-width interval in the desk X direction and move the outside on the unfixed side to keep the mesh connected.")]
+    public bool deformScaniverseWidthBand = true;
+    [Tooltip("Expand the desk-depth interval in the desk Z direction and move the outside on the unfixed side to keep the mesh connected.")]
+    public bool deformScaniverseDepthBand = true;
+    public bool recalculateScaniverseDeformedBounds = true;
 
     [Header("Hands")]
     public PinchProvider leftPinch;
@@ -70,10 +87,19 @@ public class DeskScaleSliderPanel : MonoBehaviour
     private Transform leftProbe;
     private Transform rightProbe;
     private PinchProvider draggingPinch;
+    private readonly List<ScaniverseMeshState> scaniverseMeshStates = new List<ScaniverseMeshState>();
 
 #if UNITY_EDITOR
     private bool editorRebuildQueued;
 #endif
+
+    private sealed class ScaniverseMeshState
+    {
+        public MeshFilter meshFilter;
+        public Mesh mesh;
+        public Vector3[] originalVertices;
+        public Vector3[] deformedVertices;
+    }
 
     private void OnEnable()
     {
@@ -89,9 +115,22 @@ public class DeskScaleSliderPanel : MonoBehaviour
     {
         AutoAssignReferencesIfNeeded();
         PullScaleFromController();
-        CaptureMissingInitialScales();
-        ApplyScaleToSceneObjects();
+        if (recaptureSceneObjectBaselineOnStart)
+            RecaptureSceneObjectBaselines();
+        else
+            CaptureMissingInitialScales();
+
+        if (applySceneObjectScaleOnStart)
+            ApplyScaleToSceneObjects();
+        else
+            ApplyScaniverseRoomDeformation();
+
         UpdateVisuals();
+    }
+
+    private void OnDisable()
+    {
+        RestoreScaniverseMeshes();
     }
 
     private void OnValidate()
@@ -312,7 +351,17 @@ public class DeskScaleSliderPanel : MonoBehaviour
             ApplyScaleToController();
 
         ApplyScaleToSceneObjects();
+        ApplyScaniverseRoomDeformation();
         UpdateVisuals();
+    }
+
+    public void SetScaniverseRoomDeformationEnabled(bool enabled)
+    {
+        deformScaniverseRoomWithDeskScale = enabled;
+        if (enabled)
+            ApplyScaniverseRoomDeformation();
+        else
+            RestoreScaniverseMeshes();
     }
 
     private void ApplyScaleToController()
@@ -380,12 +429,37 @@ public class DeskScaleSliderPanel : MonoBehaviour
                 continue;
             if (scaled.initialLocalScale.sqrMagnitude <= 1e-8f)
                 scaled.initialLocalScale = scaled.target.localScale;
+            if (IsZeroQuaternion(scaled.initialLocalRotation))
+                scaled.initialLocalRotation = scaled.target.localRotation;
             if (!scaled.hasInitialLocalBounds)
             {
                 scaled.initialLocalPosition = scaled.target.localPosition;
                 scaled.hasInitialLocalBounds = TryGetLocalRenderBounds(scaled.target, out scaled.initialLocalBoundsMin, out scaled.initialLocalBoundsMax);
             }
         }
+    }
+
+    [ContextMenu("Desk Scale Slider/Recapture Scene Object Baselines")]
+    public void RecaptureSceneObjectBaselines()
+    {
+        AutoFindMinitableIfNeeded();
+
+        if (scaledObjects == null)
+            return;
+
+        for (int i = 0; i < scaledObjects.Length; i++)
+        {
+            ScaledObject scaled = scaledObjects[i];
+            if (scaled == null || scaled.target == null)
+                continue;
+
+            scaled.initialLocalScale = scaled.target.localScale;
+            scaled.initialLocalPosition = scaled.target.localPosition;
+            scaled.initialLocalRotation = scaled.target.localRotation;
+            scaled.hasInitialLocalBounds = TryGetLocalRenderBounds(scaled.target, out scaled.initialLocalBoundsMin, out scaled.initialLocalBoundsMax);
+        }
+
+        ResetScaniverseMeshCache();
     }
 
     private void AutoFindMinitableIfNeeded()
@@ -406,6 +480,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
                 target = minitable,
                 initialLocalScale = minitable.localScale,
                 initialLocalPosition = minitable.localPosition,
+                initialLocalRotation = minitable.localRotation,
                 hasInitialLocalBounds = hasBounds,
                 initialLocalBoundsMin = boundsMin,
                 initialLocalBoundsMax = boundsMax
@@ -418,17 +493,375 @@ public class DeskScaleSliderPanel : MonoBehaviour
         if (scaled == null || !scaled.hasInitialLocalBounds)
             return Vector3.zero;
 
-        Vector3 localDirection = seatedSideLocalDirection.sqrMagnitude > 1e-8f
+        if (!TryGetFixedEdgeLocalCoordinate(scaled, out Vector3 fixedEdgeCoordinate))
+            return Vector3.zero;
+
+        Quaternion initialRotation = IsZeroQuaternion(scaled.initialLocalRotation)
+            ? scaled.target.localRotation
+            : scaled.initialLocalRotation;
+
+        Vector3 initialEdgeOffset = Vector3.Scale(scaled.initialLocalScale, fixedEdgeCoordinate);
+        Vector3 scaledEdgeOffset = Vector3.Scale(scaled.target.localScale, fixedEdgeCoordinate);
+        return initialRotation * (initialEdgeOffset - scaledEdgeOffset);
+    }
+
+    private bool TryGetFixedEdgeLocalCoordinate(ScaledObject scaled, out Vector3 fixedEdgeCoordinate)
+    {
+        fixedEdgeCoordinate = Vector3.zero;
+        if (scaled == null || scaled.target == null || !scaled.hasInitialLocalBounds)
+            return false;
+
+        BoundsEdges edges = new BoundsEdges(scaled.initialLocalBoundsMin, scaled.initialLocalBoundsMax);
+        if (chooseFixedEdgeFromRedirectionOrigin && TryGetRedirectionOriginTransform(out Transform redirectionOrigin))
+        {
+            Vector3 originLocal = scaled.target.InverseTransformPoint(redirectionOrigin.position);
+            float minXDistance = SqrDistanceToXEdge(originLocal, edges.minX, edges);
+            float maxXDistance = SqrDistanceToXEdge(originLocal, edges.maxX, edges);
+            float minZDistance = SqrDistanceToZEdge(originLocal, edges.minZ, edges);
+            float maxZDistance = SqrDistanceToZEdge(originLocal, edges.maxZ, edges);
+
+            float bestDistance = minXDistance;
+            fixedEdgeCoordinate = new Vector3(edges.minX, 0f, 0f);
+
+            if (maxXDistance < bestDistance)
+            {
+                bestDistance = maxXDistance;
+                fixedEdgeCoordinate = new Vector3(edges.maxX, 0f, 0f);
+            }
+
+            if (minZDistance < bestDistance)
+            {
+                bestDistance = minZDistance;
+                fixedEdgeCoordinate = new Vector3(0f, 0f, edges.minZ);
+            }
+
+            if (maxZDistance < bestDistance)
+                fixedEdgeCoordinate = new Vector3(0f, 0f, edges.maxZ);
+
+            return true;
+        }
+
+        Vector3 fallbackDirection = seatedSideLocalDirection.sqrMagnitude > 1e-8f
             ? seatedSideLocalDirection.normalized
             : Vector3.back;
+        if (Mathf.Abs(fallbackDirection.x) > Mathf.Abs(fallbackDirection.z))
+            fixedEdgeCoordinate = new Vector3(fallbackDirection.x < 0f ? edges.minX : edges.maxX, 0f, 0f);
+        else
+            fixedEdgeCoordinate = new Vector3(0f, 0f, fallbackDirection.z < 0f ? edges.minZ : edges.maxZ);
 
-        Vector3 halfSize = (scaled.initialLocalBoundsMax - scaled.initialLocalBoundsMin) * 0.5f;
-        Vector3 localOffset = new Vector3(
-            localDirection.x * halfSize.x * (factor - 1f),
-            keepSceneObjectHeight ? 0f : localDirection.y * halfSize.y * (factor - 1f),
-            localDirection.z * halfSize.z * (factor - 1f));
+        return true;
+    }
 
-        return -localOffset;
+    private bool TryGetRedirectionOriginTransform(out Transform redirectionOrigin)
+    {
+        redirectionOrigin = null;
+
+        GoGoInteractionController_NoY3 controller = ResolveRedirectionController();
+        if (controller != null && controller.redirectionOrigin != null)
+        {
+            redirectionOrigin = controller.redirectionOrigin;
+            return true;
+        }
+
+        SpatialAnchorToDeskOriginBinder binder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
+        if (binder != null && binder.redirectionOrigin != null)
+        {
+            redirectionOrigin = binder.redirectionOrigin;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void ApplyScaniverseRoomDeformation()
+    {
+        if (!Application.isPlaying)
+            return;
+        if (!deformScaniverseRoomWithDeskScale)
+        {
+            RestoreScaniverseMeshes();
+            return;
+        }
+        if (scaledObjects == null || scaledObjects.Length == 0)
+            return;
+
+        ScaledObject desk = FindPrimaryScaledObject();
+        if (desk == null || desk.target == null || !desk.hasInitialLocalBounds)
+            return;
+
+        Transform scaniverseRoot = FindSceneTransformByName(scaniverseRootName, null);
+        if (scaniverseRoot == null)
+            return;
+
+        EnsureScaniverseMeshCache(scaniverseRoot);
+        if (scaniverseMeshStates.Count == 0)
+            return;
+
+        Matrix4x4 initialDeskLocalToRootLocal;
+        if (!TryGetInitialDeskLocalToRootLocal(desk, scaniverseRoot, out initialDeskLocalToRootLocal))
+            return;
+
+        Matrix4x4 rootLocalToInitialDeskLocal = initialDeskLocalToRootLocal.inverse;
+        float referenceScale = Mathf.Max(0.001f, sceneObjectReferenceScale);
+        float widthFactor = applyToWidthScale ? currentScale / referenceScale : 1f;
+        float depthFactor = applyToDepthScale ? currentScale / referenceScale : 1f;
+        TryReadControllerScaleFactors(referenceScale, ref widthFactor, ref depthFactor);
+
+        BoundsEdges edges = new BoundsEdges(desk.initialLocalBoundsMin, desk.initialLocalBoundsMax);
+        Vector3 fixedCoordinate = ResolveFixedScaleCoordinate(desk, scaniverseRoot, rootLocalToInitialDeskLocal, edges);
+        Matrix4x4 rootLocalToWorld = scaniverseRoot.localToWorldMatrix;
+        Matrix4x4 worldToRootLocal = scaniverseRoot.worldToLocalMatrix;
+        for (int stateIndex = 0; stateIndex < scaniverseMeshStates.Count; stateIndex++)
+        {
+            ScaniverseMeshState state = scaniverseMeshStates[stateIndex];
+            if (state == null || state.meshFilter == null || state.mesh == null || state.originalVertices == null)
+                continue;
+
+            Matrix4x4 meshLocalToRootLocal = worldToRootLocal * state.meshFilter.transform.localToWorldMatrix;
+            Matrix4x4 rootLocalToMeshLocal = state.meshFilter.transform.worldToLocalMatrix * rootLocalToWorld;
+            if (state.deformedVertices == null || state.deformedVertices.Length != state.originalVertices.Length)
+                state.deformedVertices = new Vector3[state.originalVertices.Length];
+
+            for (int i = 0; i < state.originalVertices.Length; i++)
+            {
+                Vector3 rootLocal = meshLocalToRootLocal.MultiplyPoint3x4(state.originalVertices[i]);
+                Vector3 deskLocal = rootLocalToInitialDeskLocal.MultiplyPoint3x4(rootLocal);
+
+                if (deformScaniverseWidthBand)
+                    deskLocal.x = MapCoordinateWithConnectedOutside(deskLocal.x, edges.minX, edges.maxX, fixedCoordinate.x, widthFactor);
+                if (deformScaniverseDepthBand)
+                    deskLocal.z = MapCoordinateWithConnectedOutside(deskLocal.z, edges.minZ, edges.maxZ, fixedCoordinate.z, depthFactor);
+
+                Vector3 deformedRootLocal = initialDeskLocalToRootLocal.MultiplyPoint3x4(deskLocal);
+                state.deformedVertices[i] = rootLocalToMeshLocal.MultiplyPoint3x4(deformedRootLocal);
+            }
+
+            state.mesh.vertices = state.deformedVertices;
+            if (recalculateScaniverseDeformedBounds)
+                state.mesh.RecalculateBounds();
+        }
+    }
+
+    private ScaledObject FindPrimaryScaledObject()
+    {
+        if (scaledObjects == null)
+            return null;
+
+        for (int i = 0; i < scaledObjects.Length; i++)
+        {
+            ScaledObject scaled = scaledObjects[i];
+            if (scaled != null && scaled.target != null)
+                return scaled;
+        }
+
+        return null;
+    }
+
+    private void TryReadControllerScaleFactors(float referenceScale, ref float widthFactor, ref float depthFactor)
+    {
+        GoGoInteractionController_NoY3 controller = ResolveRedirectionController();
+        if (controller == null)
+            return;
+
+        if (applyToWidthScale)
+            widthFactor = controller.deskWidthScale / referenceScale;
+        if (applyToDepthScale)
+            depthFactor = controller.deskDepthScale / referenceScale;
+    }
+
+    private bool TryGetInitialDeskLocalToRootLocal(ScaledObject desk, Transform scaniverseRoot, out Matrix4x4 initialDeskLocalToRootLocal)
+    {
+        initialDeskLocalToRootLocal = Matrix4x4.identity;
+        if (desk == null || desk.target == null || scaniverseRoot == null)
+            return false;
+
+        Transform parent = desk.target.parent;
+        Matrix4x4 parentLocalToWorld = parent != null ? parent.localToWorldMatrix : Matrix4x4.identity;
+        Quaternion initialRotation = IsZeroQuaternion(desk.initialLocalRotation) ? desk.target.localRotation : desk.initialLocalRotation;
+        Vector3 initialScale = desk.initialLocalScale.sqrMagnitude > 1e-8f ? desk.initialLocalScale : desk.target.localScale;
+        Matrix4x4 initialDeskLocalToWorld = parentLocalToWorld * Matrix4x4.TRS(desk.initialLocalPosition, initialRotation, initialScale);
+        initialDeskLocalToRootLocal = scaniverseRoot.worldToLocalMatrix * initialDeskLocalToWorld;
+        return true;
+    }
+
+    private Vector3 ResolveFixedScaleCoordinate(ScaledObject desk, Transform scaniverseRoot, Matrix4x4 rootLocalToInitialDeskLocal, BoundsEdges edges)
+    {
+        Vector3 center = edges.Center;
+        if (chooseFixedEdgeFromRedirectionOrigin && TryGetRedirectionOriginTransform(out Transform redirectionOrigin))
+        {
+            Vector3 originRootLocal = scaniverseRoot.worldToLocalMatrix.MultiplyPoint3x4(redirectionOrigin.position);
+            Vector3 originDeskLocal = rootLocalToInitialDeskLocal.MultiplyPoint3x4(originRootLocal);
+
+            float minXDistance = SqrDistanceToXEdge(originDeskLocal, edges.minX, edges);
+            float maxXDistance = SqrDistanceToXEdge(originDeskLocal, edges.maxX, edges);
+            float minZDistance = SqrDistanceToZEdge(originDeskLocal, edges.minZ, edges);
+            float maxZDistance = SqrDistanceToZEdge(originDeskLocal, edges.maxZ, edges);
+
+            float bestDistance = minXDistance;
+            Vector3 fixedCoordinate = new Vector3(edges.minX, 0f, center.z);
+
+            if (maxXDistance < bestDistance)
+            {
+                bestDistance = maxXDistance;
+                fixedCoordinate = new Vector3(edges.maxX, 0f, center.z);
+            }
+
+            if (minZDistance < bestDistance)
+            {
+                bestDistance = minZDistance;
+                fixedCoordinate = new Vector3(center.x, 0f, edges.minZ);
+            }
+
+            if (maxZDistance < bestDistance)
+                fixedCoordinate = new Vector3(center.x, 0f, edges.maxZ);
+
+            return fixedCoordinate;
+        }
+
+        Vector3 fallbackDirection = seatedSideLocalDirection.sqrMagnitude > 1e-8f
+            ? seatedSideLocalDirection.normalized
+            : Vector3.back;
+        if (Mathf.Abs(fallbackDirection.x) > Mathf.Abs(fallbackDirection.z))
+            return new Vector3(fallbackDirection.x < 0f ? edges.minX : edges.maxX, 0f, center.z);
+
+        return new Vector3(center.x, 0f, fallbackDirection.z < 0f ? edges.minZ : edges.maxZ);
+    }
+
+    private static float MapCoordinateWithConnectedOutside(float value, float min, float max, float fixedCoordinate, float factor)
+    {
+        factor = Mathf.Max(0.001f, factor);
+        float width = max - min;
+        if (Mathf.Abs(width) <= 1e-8f || Mathf.Abs(factor - 1f) <= 1e-8f)
+            return value;
+
+        fixedCoordinate = Mathf.Clamp(fixedCoordinate, min, max);
+        float scaledMin = fixedCoordinate + (min - fixedCoordinate) * factor;
+        float scaledMax = fixedCoordinate + (max - fixedCoordinate) * factor;
+
+        if (value < min)
+            return value + (scaledMin - min);
+        if (value > max)
+            return value + (scaledMax - max);
+
+        return fixedCoordinate + (value - fixedCoordinate) * factor;
+    }
+
+    private void EnsureScaniverseMeshCache(Transform scaniverseRoot)
+    {
+        if (scaniverseRoot == null)
+            return;
+
+        MeshFilter[] filters = scaniverseRoot.GetComponentsInChildren<MeshFilter>(true);
+        for (int i = 0; i < filters.Length; i++)
+        {
+            MeshFilter filter = filters[i];
+            if (filter == null || filter.sharedMesh == null || IsScaledObjectHierarchy(filter.transform))
+                continue;
+            if (HasScaniverseMeshState(filter))
+                continue;
+
+            Mesh mesh = filter.mesh;
+            if (mesh == null)
+                continue;
+
+            ScaniverseMeshState state = new ScaniverseMeshState
+            {
+                meshFilter = filter,
+                mesh = mesh,
+                originalVertices = mesh.vertices,
+                deformedVertices = new Vector3[mesh.vertexCount]
+            };
+            scaniverseMeshStates.Add(state);
+        }
+    }
+
+    private bool HasScaniverseMeshState(MeshFilter meshFilter)
+    {
+        for (int i = 0; i < scaniverseMeshStates.Count; i++)
+        {
+            ScaniverseMeshState state = scaniverseMeshStates[i];
+            if (state != null && state.meshFilter == meshFilter)
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool IsScaledObjectHierarchy(Transform transformToCheck)
+    {
+        if (transformToCheck == null || scaledObjects == null)
+            return false;
+
+        for (int i = 0; i < scaledObjects.Length; i++)
+        {
+            ScaledObject scaled = scaledObjects[i];
+            if (scaled != null && scaled.target != null && transformToCheck.IsChildOf(scaled.target))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void RestoreScaniverseMeshes()
+    {
+        for (int i = 0; i < scaniverseMeshStates.Count; i++)
+        {
+            ScaniverseMeshState state = scaniverseMeshStates[i];
+            if (state == null || state.mesh == null || state.originalVertices == null)
+                continue;
+
+            state.mesh.vertices = state.originalVertices;
+            if (recalculateScaniverseDeformedBounds)
+                state.mesh.RecalculateBounds();
+        }
+    }
+
+    private void ResetScaniverseMeshCache()
+    {
+        RestoreScaniverseMeshes();
+        scaniverseMeshStates.Clear();
+    }
+
+    private static float SqrDistanceToXEdge(Vector3 point, float edgeX, BoundsEdges edges)
+    {
+        float clampedZ = Mathf.Clamp(point.z, edges.minZ, edges.maxZ);
+        float dx = point.x - edgeX;
+        float dz = point.z - clampedZ;
+        return dx * dx + dz * dz;
+    }
+
+    private static float SqrDistanceToZEdge(Vector3 point, float edgeZ, BoundsEdges edges)
+    {
+        float clampedX = Mathf.Clamp(point.x, edges.minX, edges.maxX);
+        float dx = point.x - clampedX;
+        float dz = point.z - edgeZ;
+        return dx * dx + dz * dz;
+    }
+
+    private static bool IsZeroQuaternion(Quaternion value)
+    {
+        return Mathf.Abs(value.x) + Mathf.Abs(value.y) + Mathf.Abs(value.z) + Mathf.Abs(value.w) <= 1e-8f;
+    }
+
+    private struct BoundsEdges
+    {
+        public float minX;
+        public float maxX;
+        public float minZ;
+        public float maxZ;
+
+        public BoundsEdges(Vector3 min, Vector3 max)
+        {
+            minX = min.x;
+            maxX = max.x;
+            minZ = min.z;
+            maxZ = max.z;
+        }
+
+        public Vector3 Center
+        {
+            get { return new Vector3((minX + maxX) * 0.5f, 0f, (minZ + maxZ) * 0.5f); }
+        }
     }
 
     private static bool TryGetLocalRenderBounds(Transform target, out Vector3 min, out Vector3 max)
@@ -447,14 +880,15 @@ public class DeskScaleSliderPanel : MonoBehaviour
             if (renderer == null)
                 continue;
 
-            Bounds bounds = renderer.bounds;
+            Bounds bounds = renderer.localBounds;
+            Matrix4x4 rendererLocalToTargetLocal = worldToLocal * renderer.transform.localToWorldMatrix;
             for (int corner = 0; corner < 8; corner++)
             {
-                Vector3 worldCorner = new Vector3(
+                Vector3 rendererLocalCorner = new Vector3(
                     (corner & 1) == 0 ? bounds.min.x : bounds.max.x,
                     (corner & 2) == 0 ? bounds.min.y : bounds.max.y,
                     (corner & 4) == 0 ? bounds.min.z : bounds.max.z);
-                Vector3 localCorner = worldToLocal.MultiplyPoint3x4(worldCorner);
+                Vector3 localCorner = rendererLocalToTargetLocal.MultiplyPoint3x4(rendererLocalCorner);
 
                 if (!hasBounds)
                 {

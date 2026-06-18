@@ -32,6 +32,8 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
     public bool autoRefreshGoGoHandRedirectionBehaviours = true;
     [Tooltip("Hand-local Scaniverse passthrough overlay is an always-on visual layer, not part of anchor readiness gating.")]
     public bool leaveHandLocalScaniverseOcclusionEnabled = true;
+    [Tooltip("When present, this controls whether DiminishedReality overlay or the scaled Scaniverse room is active.")]
+    public PassthroughScaniverseModeController passthroughScaniverseModeController;
 
     public RedirectionMode CurrentMode { get; private set; }
     public bool IsSpatialAnchorMode => CurrentMode == RedirectionMode.SpatialAnchor;
@@ -63,6 +65,9 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
     public void SetMode(RedirectionMode mode)
     {
+        if (passthroughScaniverseModeController == null)
+            passthroughScaniverseModeController = FindAnyObjectByType<PassthroughScaniverseModeController>();
+
         CurrentMode = mode;
         if (mode == RedirectionMode.SpatialAnchor && placer != null && placer.IsPlacementMode && deskBinder != null)
             deskBinder.BeginPlacementPreviewAlignment();
@@ -83,10 +88,18 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         SetBehaviourEnabled(placer, spatialMode);
         SetBehaviourEnabled(deskBinder, enableDeskBinder);
         SetBehaviourListEnabled(spatialAnchorModeBehaviours, enableSpatialAnchorDrivenRedirection);
-        if (!leaveHandLocalScaniverseOcclusionEnabled)
+        if (passthroughScaniverseModeController != null)
+        {
+            passthroughScaniverseModeController.ApplyCurrentMode();
+        }
+        else if (!leaveHandLocalScaniverseOcclusionEnabled)
+        {
             SetHandLocalScaniverseOcclusionEnabled(spatialMode && (enableSpatialAnchorDrivenRedirection || (deskBinder != null && deskBinder.IsAdjustingAlignment)));
+        }
         else
+        {
             SetHandLocalScaniverseOcclusionEnabled(true);
+        }
         SetOriginalModeBehavioursForMode(spatialMode);
         SetBehaviourListEnabled(handRedirectionBehaviours, enableHandRedirection);
         handRedirectionCurrentlyEnabled = enableHandRedirection;
@@ -130,6 +143,8 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
         if (commandReceiver == null)
             commandReceiver = FindAnyObjectByType<SpatialAnchorPlacementCommandReceiver>();
+        if (passthroughScaniverseModeController == null)
+            passthroughScaniverseModeController = FindAnyObjectByType<PassthroughScaniverseModeController>();
         if (autoRefreshGoGoHandRedirectionBehaviours || handRedirectionBehaviours == null || handRedirectionBehaviours.Length == 0)
         {
             GoGoInteractionController_NoY3[] goGoControllers = FindObjectsByType<GoGoInteractionController_NoY3>(FindObjectsSortMode.None);

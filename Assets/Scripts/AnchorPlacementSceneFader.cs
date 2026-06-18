@@ -23,6 +23,7 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         "Controller",
         "Camera",
         "Passthrough",
+        "Scaniverse",
         "Status",
         "Text",
         "GeneratedHandLocalScaniverseOverlay",

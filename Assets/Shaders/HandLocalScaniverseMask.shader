@@ -32,8 +32,8 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
         Tags
         {
             "RenderPipeline" = "UniversalPipeline"
-            "Queue" = "Geometry-50"
-            "RenderType" = "Transparent"
+            "Queue" = "Geometry"
+            "RenderType" = "Opaque"
         }
 
         Pass
@@ -41,10 +41,9 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
             Name "HandLocalMask"
             Tags { "LightMode" = "UniversalForward" }
 
-            Blend SrcAlpha OneMinusSrcAlpha
-            ZWrite Off
+            ZWrite On
             ZTest LEqual
-            Cull Back
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex vert
@@ -208,7 +207,7 @@ Shader "HandRedirection/Hand Local Scaniverse Mask"
                 clip(mask - 0.001);
 
                 half4 color = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv) * _BaseColor;
-                color.a = _Opacity * mask;
+                color.a = 1.0h;
                 return color;
             }
             ENDHLSL
