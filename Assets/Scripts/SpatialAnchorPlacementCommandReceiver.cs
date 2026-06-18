@@ -22,6 +22,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
     public SpatialAnchorToDeskOriginBinder deskBinder;
     public SpatialAnchorRedirectionToggle featureToggle;
     public PassthroughScaniverseModeController passthroughScaniverseModeController;
+    public GoGoInteractionController_NoY3 handRedirectorManager;
 
     [Header("Exhibition Reset")]
     public ExhibitionExperienceResetter experienceResetter;
@@ -46,6 +47,8 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             featureToggle = FindAnyObjectByType<SpatialAnchorRedirectionToggle>();
         if (passthroughScaniverseModeController == null)
             passthroughScaniverseModeController = FindAnyObjectByType<PassthroughScaniverseModeController>();
+        if (handRedirectorManager == null)
+            handRedirectorManager = FindAnyObjectByType<GoGoInteractionController_NoY3>();
         EnsureExperienceResetter();
     }
 
@@ -360,6 +363,29 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                     SendStatus($"PASSTHROUGH_SCANIVERSE_MODE {toggleController.CurrentMode}");
                 }
                 break;
+            case "ENABLE_GAZE_DEBUG_VISUALS":
+            case "SHOW_GAZE_DEBUG_VISUALS":
+                if (TryGetHandRedirectorManager(out GoGoInteractionController_NoY3 gazeDebugEnableController))
+                {
+                    gazeDebugEnableController.SetHmdGazeDebugVisuals(true);
+                    SendStatus("GAZE_DEBUG_VISUALS enabled");
+                }
+                break;
+            case "DISABLE_GAZE_DEBUG_VISUALS":
+            case "HIDE_GAZE_DEBUG_VISUALS":
+                if (TryGetHandRedirectorManager(out GoGoInteractionController_NoY3 gazeDebugDisableController))
+                {
+                    gazeDebugDisableController.SetHmdGazeDebugVisuals(false);
+                    SendStatus("GAZE_DEBUG_VISUALS disabled");
+                }
+                break;
+            case "TOGGLE_GAZE_DEBUG_VISUALS":
+                if (TryGetHandRedirectorManager(out GoGoInteractionController_NoY3 gazeDebugToggleController))
+                {
+                    gazeDebugToggleController.ToggleHmdGazeDebugVisuals();
+                    SendStatus($"GAZE_DEBUG_VISUALS {(gazeDebugToggleController.showHmdGazeDebugVisuals ? "enabled" : "disabled")}");
+                }
+                break;
             case "NEXT_PARTICIPANT":
             case "RESET_FOR_NEXT_PARTICIPANT":
             case "RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT":
@@ -444,6 +470,22 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         GameObject obj = new GameObject("PassthroughScaniverseModeController");
         controller = obj.AddComponent<PassthroughScaniverseModeController>();
         passthroughScaniverseModeController = controller;
+        return true;
+    }
+
+    private bool TryGetHandRedirectorManager(out GoGoInteractionController_NoY3 controller)
+    {
+        controller = handRedirectorManager != null
+            ? handRedirectorManager
+            : FindAnyObjectByType<GoGoInteractionController_NoY3>();
+
+        if (controller == null)
+        {
+            SendStatus("ERROR hand_redirector_manager_not_found");
+            return false;
+        }
+
+        handRedirectorManager = controller;
         return true;
     }
 

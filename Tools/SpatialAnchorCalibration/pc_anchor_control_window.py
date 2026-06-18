@@ -14,7 +14,7 @@ class AnchorControlWindow:
     def __init__(self, root):
         self.root = root
         self.root.title("Spatial Anchor Calibration Control")
-        self.root.geometry("520x650")
+        self.root.geometry("520x700")
         self.running = True
 
         self.quest_ip = tk.StringVar(value=DEFAULT_QUEST_IP)
@@ -86,6 +86,12 @@ class AnchorControlWindow:
         )
         ttk.Button(button_frame, text="Next Participant / Reset Objects", command=lambda: self._send("RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT")).grid(
             row=8, column=0, columnspan=2, sticky="ew", pady=(8, 0)
+        )
+        ttk.Button(button_frame, text="Gaze Debug ON", command=lambda: self._send("ENABLE_GAZE_DEBUG_VISUALS")).grid(
+            row=9, column=0, sticky="ew", padx=(0, 6), pady=(8, 0)
+        )
+        ttk.Button(button_frame, text="Gaze Debug OFF", command=lambda: self._send("DISABLE_GAZE_DEBUG_VISUALS")).grid(
+            row=9, column=1, sticky="ew", padx=(6, 0), pady=(8, 0)
         )
 
         ttk.Label(frame, text="Status").grid(row=3, column=0, columnspan=2, sticky="w", pady=(20, 4))

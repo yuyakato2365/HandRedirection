@@ -73,7 +73,7 @@ function Poll-Status {
 
 $form = [System.Windows.Forms.Form]::new()
 $form.Text = "Spatial Anchor Calibration Control"
-$form.Size = [System.Drawing.Size]::new(560, 878)
+$form.Size = [System.Drawing.Size]::new(560, 922)
 $form.StartPosition = "CenterScreen"
 
 $ipLabel = [System.Windows.Forms.Label]::new()
@@ -289,14 +289,32 @@ $nextParticipantButton.Add_Click({
 })
 $form.Controls.Add($nextParticipantButton)
 
-$statusTitle.Location = [System.Drawing.Point]::new(16, 684)
+$gazeDebugOnButton = [System.Windows.Forms.Button]::new()
+$gazeDebugOnButton.Text = "Gaze Debug ON"
+$gazeDebugOnButton.Location = [System.Drawing.Point]::new(16, 678)
+$gazeDebugOnButton.Size = [System.Drawing.Size]::new(248, 34)
+$gazeDebugOnButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "ENABLE_GAZE_DEBUG_VISUALS"
+})
+$form.Controls.Add($gazeDebugOnButton)
+
+$gazeDebugOffButton = [System.Windows.Forms.Button]::new()
+$gazeDebugOffButton.Text = "Gaze Debug OFF"
+$gazeDebugOffButton.Location = [System.Drawing.Point]::new(278, 678)
+$gazeDebugOffButton.Size = [System.Drawing.Size]::new(248, 34)
+$gazeDebugOffButton.Add_Click({
+    Send-QuestCommand $ipBox.Text "DISABLE_GAZE_DEBUG_VISUALS"
+})
+$form.Controls.Add($gazeDebugOffButton)
+
+$statusTitle.Location = [System.Drawing.Point]::new(16, 728)
 $statusTitle.Size = [System.Drawing.Size]::new(80, 24)
 $form.Controls.Add($statusTitle)
 
 $statusLabel = [System.Windows.Forms.Label]::new()
 $statusLabel.Text = "Waiting for status"
 $statusLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::Fixed3D
-$statusLabel.Location = [System.Drawing.Point]::new(16, 710)
+$statusLabel.Location = [System.Drawing.Point]::new(16, 754)
 $statusLabel.Size = [System.Drawing.Size]::new(510, 28)
 $form.Controls.Add($statusLabel)
 
@@ -304,7 +322,7 @@ $logBox = [System.Windows.Forms.TextBox]::new()
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
-$logBox.Location = [System.Drawing.Point]::new(16, 750)
+$logBox.Location = [System.Drawing.Point]::new(16, 794)
 $logBox.Size = [System.Drawing.Size]::new(510, 72)
 $form.Controls.Add($logBox)
 
