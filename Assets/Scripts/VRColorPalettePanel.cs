@@ -118,11 +118,6 @@ public class VRColorPalettePanel : MonoBehaviour
         RequestRebuild();
     }
 
-    void Awake()
-    {
-        RequestRebuild();
-    }
-
     void Start()
     {
         AutoAssignPinchProvidersIfNeeded();
@@ -364,7 +359,11 @@ public class VRColorPalettePanel : MonoBehaviour
         {
             Transform child = transform.GetChild(i);
             if (IsGeneratedChild(child.name))
+            {
+                if (Application.isPlaying)
+                    child.gameObject.SetActive(false);
                 DestroyImmediateSafe(child.gameObject);
+            }
         }
     }
 

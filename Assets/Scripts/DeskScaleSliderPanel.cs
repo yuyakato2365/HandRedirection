@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -41,6 +42,24 @@ public class DeskScaleSliderPanel : MonoBehaviour
     [Tooltip("Do not scale scene object height when desk scale changes.")]
     public bool keepSceneObjectHeight = true;
     public ScaledObject[] scaledObjects = new ScaledObject[0];
+
+    [Header("UI Position Follow")]
+    [Tooltip("Move the desk slider with the scaled desk. Child UI, such as the color palette, follows through the Transform hierarchy.")]
+    public bool moveUiWithDeskScale = true;
+    [Tooltip("Move followed UI only along its parent-local Z axis, preserving its manually placed X/Y position.")]
+    public bool moveUiOnlyAlongParentLocalZ = true;
+    [Tooltip("Multiplier for UI movement away from its 1x position. 0.85 makes the 3x desk position appear at about 2.7x while keeping 1x unchanged.")]
+    [Range(0f, 1.5f)] public float uiFollowMovementRatio = 0.85f;
+    [Tooltip("Defaults to this DeskScaleSliderPanel transform.")]
+    public Transform deskSliderToMove;
+
+    [Header("VR Flicker Diagnostics")]
+    [Tooltip("Logs slider/desk/palette pose jumps, renderer state changes, and long frames without changing their transforms.")]
+    public bool logUiFlickerDiagnostics = true;
+    public float diagnosticPositionJumpMeters = 0.005f;
+    public float diagnosticRotationJumpDegrees = 0.5f;
+    public float diagnosticLongFrameSeconds = 0.05f;
+    public float diagnosticLogCooldownSeconds = 0.25f;
 
     [Header("Scaniverse Partial Deformation")]
     [Tooltip("Deforms the Scaniverse room continuously from the desk footprint so the scaled area stays connected to the surrounding mesh.")]
@@ -87,7 +106,26 @@ public class DeskScaleSliderPanel : MonoBehaviour
     private Transform leftProbe;
     private Transform rightProbe;
     private PinchProvider draggingPinch;
+    private Matrix4x4 dragTrackWorldToLocal;
+    private bool hasDragTrackFrame;
     private readonly List<ScaniverseMeshState> scaniverseMeshStates = new List<ScaniverseMeshState>();
+    private Transform uiFollowDesk;
+    private Vector3 deskSliderInitialDeskLocalPosition;
+    private Vector3 deskSliderInitialParentLocalPosition;
+    private bool hasDeskSliderFollowBaseline;
+    private Transform diagnosticPalette;
+    private Renderer[] diagnosticRenderers = new Renderer[0];
+    private bool[] diagnosticRendererStates = new bool[0];
+    private Vector3 diagnosticLastSliderWorldPosition;
+    private Vector3 diagnosticLastSliderLocalPosition;
+    private Quaternion diagnosticLastSliderWorldRotation;
+    private Vector3 diagnosticLastDeskWorldPosition;
+    private Quaternion diagnosticLastDeskWorldRotation;
+    private Vector3 diagnosticLastPaletteLocalPosition;
+    private int diagnosticLastEnabledRendererCount;
+    private float diagnosticNextLogTime;
+    private bool diagnosticInitialized;
+    private string diagnosticLogPath;
 
 #if UNITY_EDITOR
     private bool editorRebuildQueued;
@@ -103,11 +141,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
     private void OnEnable()
     {
-        RequestRebuild();
-    }
-
-    private void Awake()
-    {
+        diagnosticInitialized = false;
         RequestRebuild();
     }
 
@@ -118,7 +152,10 @@ public class DeskScaleSliderPanel : MonoBehaviour
         if (recaptureSceneObjectBaselineOnStart)
             RecaptureSceneObjectBaselines();
         else
+        {
             CaptureMissingInitialScales();
+            CaptureUiFollowBaselines(true);
+        }
 
         if (applySceneObjectScaleOnStart)
             ApplyScaleToSceneObjects();
@@ -126,6 +163,14 @@ public class DeskScaleSliderPanel : MonoBehaviour
             ApplyScaniverseRoomDeformation();
 
         UpdateVisuals();
+    }
+
+    private void LateUpdate()
+    {
+        if (!Application.isPlaying || !logUiFlickerDiagnostics)
+            return;
+
+        UpdateUiFlickerDiagnostics();
     }
 
     private void OnDisable()
@@ -145,6 +190,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
         knobSize.x = Mathf.Max(0.008f, knobSize.x);
         knobSize.y = Mathf.Max(0.012f, knobSize.y);
         touchRadius = Mathf.Max(0.001f, touchRadius);
+        uiFollowMovementRatio = Mathf.Clamp(uiFollowMovementRatio, 0f, 1.5f);
         RequestRebuild();
     }
 
@@ -283,7 +329,11 @@ public class DeskScaleSliderPanel : MonoBehaviour
         {
             Transform child = transform.GetChild(i);
             if (IsGeneratedChild(child.name))
+            {
+                if (Application.isPlaying)
+                    child.gameObject.SetActive(false);
                 DestroyImmediateSafe(child.gameObject);
+            }
         }
     }
 
@@ -307,6 +357,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
         if (draggingPinch == pinch && !pinching)
         {
             draggingPinch = null;
+            hasDragTrackFrame = false;
             return;
         }
 
@@ -319,7 +370,12 @@ public class DeskScaleSliderPanel : MonoBehaviour
         if (draggingPinch == null && !IsNearSlider(pinch.PinchPosWorld))
             return;
 
-        draggingPinch = pinch;
+        if (draggingPinch == null)
+        {
+            draggingPinch = pinch;
+            dragTrackWorldToLocal = track.worldToLocalMatrix;
+            hasDragTrackFrame = true;
+        }
         if (TryGetSliderT(pinch.PinchPosWorld, out float t))
             SetScale(Mathf.Lerp(minScale, maxScale, t), true);
     }
@@ -339,7 +395,9 @@ public class DeskScaleSliderPanel : MonoBehaviour
         if (track == null)
             return false;
 
-        Vector3 local = track.InverseTransformPoint(worldPosition);
+        Vector3 local = hasDragTrackFrame && draggingPinch != null
+            ? dragTrackWorldToLocal.MultiplyPoint3x4(worldPosition)
+            : track.InverseTransformPoint(worldPosition);
         t = Mathf.Clamp01(local.x + 0.5f);
         return true;
     }
@@ -413,6 +471,8 @@ public class DeskScaleSliderPanel : MonoBehaviour
             if (keepSeatedSideEdgeFixed)
                 scaled.target.localPosition = scaled.initialLocalPosition + ComputeFixedEdgeOffset(scaled, factor);
         }
+
+        ApplyUiFollowPositions();
     }
 
     private void CaptureMissingInitialScales()
@@ -460,6 +520,97 @@ public class DeskScaleSliderPanel : MonoBehaviour
         }
 
         ResetScaniverseMeshCache();
+        CaptureUiFollowBaselines(true);
+    }
+
+    private void CaptureUiFollowBaselines(bool force)
+    {
+        if (!moveUiWithDeskScale)
+            return;
+
+        ResolveUiFollowReference();
+        ScaledObject desk = GetPrimaryScaledObject();
+        if (desk == null || desk.target == null)
+            return;
+
+        uiFollowDesk = desk.target;
+        if (deskSliderToMove != null && (force || !hasDeskSliderFollowBaseline))
+        {
+            deskSliderInitialDeskLocalPosition = uiFollowDesk.InverseTransformPoint(deskSliderToMove.position);
+            deskSliderInitialParentLocalPosition = deskSliderToMove.localPosition;
+            hasDeskSliderFollowBaseline = true;
+        }
+
+    }
+
+    private void ApplyUiFollowPositions()
+    {
+        if (!moveUiWithDeskScale)
+            return;
+
+        if (uiFollowDesk == null)
+            CaptureUiFollowBaselines(false);
+        if (uiFollowDesk == null)
+            return;
+
+        if (deskSliderToMove != null && hasDeskSliderFollowBaseline && !deskSliderToMove.IsChildOf(uiFollowDesk))
+            ApplyUiFollowPosition(deskSliderToMove, deskSliderInitialDeskLocalPosition, deskSliderInitialParentLocalPosition);
+    }
+
+    private void ApplyUiFollowPosition(Transform target, Vector3 initialDeskLocalPosition, Vector3 initialParentLocalPosition)
+    {
+        Vector3 followedWorldPosition = uiFollowDesk.TransformPoint(initialDeskLocalPosition);
+        if (!moveUiOnlyAlongParentLocalZ)
+        {
+            Vector3 initialWorldPosition = target.parent != null
+                ? target.parent.TransformPoint(initialParentLocalPosition)
+                : initialParentLocalPosition;
+            Vector3 desiredWorldPosition = initialWorldPosition
+                + (followedWorldPosition - initialWorldPosition) * uiFollowMovementRatio;
+            if ((target.position - desiredWorldPosition).sqrMagnitude > 0.0000000001f)
+                target.position = desiredWorldPosition;
+            return;
+        }
+
+        if (target.parent == null)
+        {
+            float desiredZ = initialParentLocalPosition.z
+                + (followedWorldPosition.z - initialParentLocalPosition.z) * uiFollowMovementRatio;
+            Vector3 desiredWorldPosition = new Vector3(initialParentLocalPosition.x, initialParentLocalPosition.y, desiredZ);
+            if ((target.position - desiredWorldPosition).sqrMagnitude > 0.0000000001f)
+                target.position = desiredWorldPosition;
+            return;
+        }
+
+        Vector3 followedParentLocalPosition = target.parent.InverseTransformPoint(followedWorldPosition);
+        float desiredLocalZ = initialParentLocalPosition.z
+            + (followedParentLocalPosition.z - initialParentLocalPosition.z) * uiFollowMovementRatio;
+        Vector3 desiredLocalPosition = new Vector3(
+            initialParentLocalPosition.x,
+            initialParentLocalPosition.y,
+            desiredLocalZ);
+        if ((target.localPosition - desiredLocalPosition).sqrMagnitude > 0.0000000001f)
+            target.localPosition = desiredLocalPosition;
+    }
+
+    private void ResolveUiFollowReference()
+    {
+        if (deskSliderToMove == null)
+            deskSliderToMove = transform;
+    }
+
+    private ScaledObject GetPrimaryScaledObject()
+    {
+        if (scaledObjects == null)
+            return null;
+
+        for (int i = 0; i < scaledObjects.Length; i++)
+        {
+            if (scaledObjects[i] != null && scaledObjects[i].target != null)
+                return scaledObjects[i];
+        }
+
+        return null;
     }
 
     private void AutoFindMinitableIfNeeded()
@@ -1055,6 +1206,149 @@ public class DeskScaleSliderPanel : MonoBehaviour
         return text.Contains("left") || text.Contains("_l") || text.Contains("-l");
     }
 
+    private void UpdateUiFlickerDiagnostics()
+    {
+        Transform slider = deskSliderToMove != null ? deskSliderToMove : transform;
+        if (!diagnosticInitialized)
+        {
+            InitializeUiFlickerDiagnostics(slider);
+            return;
+        }
+
+        Transform sliderParent = slider.parent;
+        float sliderWorldJump = Vector3.Distance(diagnosticLastSliderWorldPosition, slider.position);
+        float sliderLocalJump = Vector3.Distance(diagnosticLastSliderLocalPosition, slider.localPosition);
+        float sliderRotationJump = Quaternion.Angle(diagnosticLastSliderWorldRotation, slider.rotation);
+        float parentWorldJump = sliderParent != null
+            ? Vector3.Distance(diagnosticLastDeskWorldPosition, sliderParent.position)
+            : 0f;
+        float parentRotationJump = sliderParent != null
+            ? Quaternion.Angle(diagnosticLastDeskWorldRotation, sliderParent.rotation)
+            : 0f;
+        float paletteLocalJump = diagnosticPalette != null
+            ? Vector3.Distance(diagnosticLastPaletteLocalPosition, diagnosticPalette.localPosition)
+            : 0f;
+
+        int enabledRendererCount = 0;
+        string rendererChanges = string.Empty;
+        for (int i = 0; i < diagnosticRenderers.Length; i++)
+        {
+            Renderer renderer = diagnosticRenderers[i];
+            bool visible = renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy;
+            if (visible)
+                enabledRendererCount++;
+            if (i < diagnosticRendererStates.Length && visible != diagnosticRendererStates[i])
+            {
+                rendererChanges += (rendererChanges.Length == 0 ? string.Empty : ",")
+                    + (renderer != null ? renderer.name : "destroyed")
+                    + "=" + (visible ? "on" : "off");
+                diagnosticRendererStates[i] = visible;
+            }
+        }
+
+        bool poseJump = sliderWorldJump >= diagnosticPositionJumpMeters
+            || sliderLocalJump >= diagnosticPositionJumpMeters
+            || sliderRotationJump >= diagnosticRotationJumpDegrees
+            || parentWorldJump >= diagnosticPositionJumpMeters
+            || parentRotationJump >= diagnosticRotationJumpDegrees
+            || paletteLocalJump >= diagnosticPositionJumpMeters;
+        bool rendererChanged = enabledRendererCount != diagnosticLastEnabledRendererCount || rendererChanges.Length > 0;
+        bool longFrame = Time.unscaledDeltaTime >= diagnosticLongFrameSeconds;
+
+        if ((poseJump || rendererChanged || longFrame) && Time.unscaledTime >= diagnosticNextLogTime)
+        {
+            diagnosticNextLogTime = Time.unscaledTime + Mathf.Max(0.05f, diagnosticLogCooldownSeconds);
+            string line = $"frame={Time.frameCount} dt={Time.unscaledDeltaTime:0.0000}s "
+                + $"sliderWorldJump={sliderWorldJump:0.0000}m sliderLocalJump={sliderLocalJump:0.0000}m sliderRotJump={sliderRotationJump:0.00}deg "
+                + $"parentWorldJump={parentWorldJump:0.0000}m parentRotJump={parentRotationJump:0.00}deg "
+                + $"paletteLocalJump={paletteLocalJump:0.0000}m renderers={enabledRendererCount}/{diagnosticRenderers.Length} "
+                + $"rendererChanges=[{rendererChanges}] dragging={(draggingPinch != null)} scale={currentScale:0.000}";
+            WriteUiFlickerDiagnostic(line, true);
+        }
+
+        diagnosticLastSliderWorldPosition = slider.position;
+        diagnosticLastSliderLocalPosition = slider.localPosition;
+        diagnosticLastSliderWorldRotation = slider.rotation;
+        if (sliderParent != null)
+        {
+            diagnosticLastDeskWorldPosition = sliderParent.position;
+            diagnosticLastDeskWorldRotation = sliderParent.rotation;
+        }
+        if (diagnosticPalette != null)
+            diagnosticLastPaletteLocalPosition = diagnosticPalette.localPosition;
+        diagnosticLastEnabledRendererCount = enabledRendererCount;
+    }
+
+    private void InitializeUiFlickerDiagnostics(Transform slider)
+    {
+        diagnosticPalette = FindChildRecursive(slider, "VRColorPalettePanel");
+        diagnosticRenderers = slider.GetComponentsInChildren<Renderer>(true);
+        diagnosticRendererStates = new bool[diagnosticRenderers.Length];
+        diagnosticLastEnabledRendererCount = 0;
+        for (int i = 0; i < diagnosticRenderers.Length; i++)
+        {
+            Renderer renderer = diagnosticRenderers[i];
+            bool visible = renderer != null && renderer.enabled && renderer.gameObject.activeInHierarchy;
+            diagnosticRendererStates[i] = visible;
+            if (visible)
+                diagnosticLastEnabledRendererCount++;
+        }
+
+        diagnosticLastSliderWorldPosition = slider.position;
+        diagnosticLastSliderLocalPosition = slider.localPosition;
+        diagnosticLastSliderWorldRotation = slider.rotation;
+        if (slider.parent != null)
+        {
+            diagnosticLastDeskWorldPosition = slider.parent.position;
+            diagnosticLastDeskWorldRotation = slider.parent.rotation;
+        }
+        if (diagnosticPalette != null)
+            diagnosticLastPaletteLocalPosition = diagnosticPalette.localPosition;
+
+        diagnosticLogPath = Path.Combine(Application.persistentDataPath, "DeskUiFlickerDiagnostics.log");
+        diagnosticInitialized = true;
+        WriteUiFlickerDiagnostic(
+            $"START slider={slider.name} parent={(slider.parent != null ? slider.parent.name : "none")} "
+            + $"palette={(diagnosticPalette != null ? diagnosticPalette.name : "not-found")} "
+            + $"renderers={diagnosticLastEnabledRendererCount}/{diagnosticRenderers.Length} path={diagnosticLogPath}",
+            false);
+    }
+
+    private void WriteUiFlickerDiagnostic(string message, bool warning)
+    {
+        string line = $"{System.DateTime.UtcNow:O} {message}";
+        if (warning)
+            Debug.LogWarning("[DeskUiFlicker] " + line, this);
+        else
+            Debug.Log("[DeskUiFlicker] " + line, this);
+
+        try
+        {
+            File.AppendAllText(diagnosticLogPath, line + System.Environment.NewLine);
+        }
+        catch (System.Exception exception)
+        {
+            Debug.LogWarning("[DeskUiFlicker] Failed to write diagnostics: " + exception.Message, this);
+            logUiFlickerDiagnostics = false;
+        }
+    }
+
+    private static Transform FindChildRecursive(Transform root, string childName)
+    {
+        if (root == null)
+            return null;
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (string.Equals(child.name, childName, System.StringComparison.OrdinalIgnoreCase))
+                return child;
+            Transform nested = FindChildRecursive(child, childName);
+            if (nested != null)
+                return nested;
+        }
+        return null;
+    }
+
     private void UpdateTouchProbe(Transform probe, PinchProvider pinch)
     {
         if (!showTouchProbe || probe == null || pinch == null)
@@ -1090,7 +1384,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
         return shader != null ? new Material(shader) : new Material(Shader.Find("Sprites/Default"));
     }
 
-    private static void DestroyImmediateSafe(Object obj)
+    private static void DestroyImmediateSafe(UnityEngine.Object obj)
     {
         if (obj == null)
             return;
