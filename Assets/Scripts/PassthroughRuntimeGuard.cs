@@ -6,7 +6,24 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
     private const string LogPrefix = "[PassthroughRuntimeGuard]";
     private const string SceneMatchedScaniverseRootName = "Scaniverse 2026-06-17 213301";
     private const string GeneratedHandLocalOverlayPrefix = "GeneratedHandLocalScaniverseOverlay";
-    private static readonly string[] OcclusionScaniverseRootNames =
+    private static readonly string[] DefaultScaniverseRootNames =
+    {
+        SceneMatchedScaniverseRootName,
+        "Scaniverse 2026-05-20 114107"
+    };
+
+    [Header("Scaniverse Targets")]
+    [Tooltip("Drag the room/scan roots that should be enabled and handled by the passthrough runtime here. When set, these references take priority over name matching.")]
+    public Transform[] scaniverseTargets;
+
+    [Tooltip("Enable each configured target before passthrough materials and the hand-local overlay are prepared.")]
+    public bool activateConfiguredTargetsOnStart = true;
+
+    [Tooltip("Use the name list below when no explicit target has been assigned.")]
+    public bool useNameFallbackWhenNoTargets = true;
+
+    [Tooltip("Fallback root-name fragments for the hand-local overlay. These are used only when Scaniverse Targets is empty.")]
+    public string[] fallbackOcclusionRootNameContains =
     {
         SceneMatchedScaniverseRootName,
         "Scaniverse 2026-05-20 114107"
@@ -39,8 +56,9 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
             Debug.Log($"{LogPrefix} Layer active={layer.isActiveAndEnabled}, projection={layer.projectionSurfaceType}, placement={layer.overlayType}, hidden={layer.hidden}, opacity={layer.textureOpacity}");
         }
 
+        ActivateConfiguredTargets();
         ConfigureActiveScaniverseMaterials();
-        EnsureHandLocalScaniverseOcclusion();
+        EnsureConfiguredHandLocalScaniverseOcclusion();
         EnsurePassthroughScaniverseModeController();
         EnsureAnchorPlacementSceneFader();
         StartCoroutine(LogState());
@@ -51,7 +69,7 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         ConfigureActiveScaniverseMaterials(false);
     }
 
-    private static void ConfigureActiveScaniverseMaterials(bool logResult = true)
+    private void ConfigureActiveScaniverseMaterials(bool logResult = true)
     {
         Shader unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
         if (unlitShader == null)
@@ -71,7 +89,7 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
                 continue;
             if (IsGeneratedHandLocalOverlay(renderer))
                 continue;
-            if (!IsUnderSceneMatchedScaniverseRoot(renderer.transform))
+            if (!IsUnderConfiguredScaniverseRoot(renderer.transform))
                 continue;
 
             Material[] materials = renderer.sharedMaterials;
@@ -110,18 +128,86 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
             Debug.Log($"{LogPrefix} Normalized Scaniverse materials to URP/Unlit double-sided. renderers={rendererCount}, materials={materialCount}");
     }
 
-    private static bool IsUnderSceneMatchedScaniverseRoot(Transform transform)
+    private void ActivateConfiguredTargets()
     {
+        if (!activateConfiguredTargetsOnStart || scaniverseTargets == null)
+            return;
+
+        for (int i = 0; i < scaniverseTargets.Length; i++)
+        {
+            Transform target = scaniverseTargets[i];
+            if (target == null || target.gameObject.activeSelf)
+                continue;
+
+            target.gameObject.SetActive(true);
+            Debug.Log($"{LogPrefix} Activated configured Scaniverse target '{GetHierarchyPath(target)}'.", target);
+        }
+    }
+
+    private bool IsUnderConfiguredScaniverseRoot(Transform transform)
+    {
+        if (HasConfiguredTargets())
+        {
+            for (int i = 0; i < scaniverseTargets.Length; i++)
+            {
+                Transform target = scaniverseTargets[i];
+                if (target != null && (transform == target || transform.IsChildOf(target)))
+                    return true;
+            }
+
+            return false;
+        }
+
+        if (!useNameFallbackWhenNoTargets)
+            return false;
+
         Transform current = transform;
         while (current != null)
         {
-            if (current.name.Contains(SceneMatchedScaniverseRootName))
+            if (current.name.IndexOf(SceneMatchedScaniverseRootName, System.StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
             current = current.parent;
         }
 
         return false;
+    }
+
+    private bool HasConfiguredTargets()
+    {
+        if (scaniverseTargets == null)
+            return false;
+
+        for (int i = 0; i < scaniverseTargets.Length; i++)
+        {
+            if (scaniverseTargets[i] != null)
+                return true;
+        }
+
+        return false;
+    }
+
+    private string[] GetFallbackRootNames()
+    {
+        return fallbackOcclusionRootNameContains != null && fallbackOcclusionRootNameContains.Length > 0
+            ? fallbackOcclusionRootNameContains
+            : DefaultScaniverseRootNames;
+    }
+
+    private static string GetHierarchyPath(Transform transform)
+    {
+        if (transform == null)
+            return "(null)";
+
+        string path = transform.name;
+        Transform current = transform.parent;
+        while (current != null)
+        {
+            path = $"{current.name}/{path}";
+            current = current.parent;
+        }
+
+        return path;
     }
 
     private static bool IsGeneratedHandLocalOverlay(Renderer renderer)
@@ -149,6 +235,26 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
 
     public static HandLocalScaniverseOcclusion EnsureHandLocalScaniverseOcclusion()
     {
+        PassthroughRuntimeGuard guard = FindFirstObjectByType<PassthroughRuntimeGuard>();
+        return guard != null
+            ? guard.EnsureConfiguredHandLocalScaniverseOcclusion()
+            : EnsureHandLocalScaniverseOcclusionInternal(null, DefaultScaniverseRootNames, true);
+    }
+
+    private HandLocalScaniverseOcclusion EnsureConfiguredHandLocalScaniverseOcclusion()
+    {
+        bool hasConfiguredTargets = HasConfiguredTargets();
+        Transform[] targets = hasConfiguredTargets ? scaniverseTargets : null;
+        string[] names = hasConfiguredTargets ? null : GetFallbackRootNames();
+        bool autoFindRoots = !hasConfiguredTargets && useNameFallbackWhenNoTargets;
+        return EnsureHandLocalScaniverseOcclusionInternal(targets, names, autoFindRoots);
+    }
+
+    private static HandLocalScaniverseOcclusion EnsureHandLocalScaniverseOcclusionInternal(
+        Transform[] targets,
+        string[] rootNameContains,
+        bool autoFindRoots)
+    {
         var occlusion = FindFirstObjectByType<HandLocalScaniverseOcclusion>();
         bool created = false;
 
@@ -159,7 +265,7 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
             created = true;
         }
 
-        ApplyHandLocalScaniverseRuntimeDefaults(occlusion, created);
+        ApplyHandLocalScaniverseRuntimeDefaults(occlusion, created, targets, rootNameContains, autoFindRoots);
         occlusion.enabled = true;
         occlusion.RebuildOverlay();
 
@@ -185,18 +291,25 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         controller.ApplyCurrentMode();
     }
 
-    private static void ApplyHandLocalScaniverseRuntimeDefaults(HandLocalScaniverseOcclusion occlusion, bool created)
+    private static void ApplyHandLocalScaniverseRuntimeDefaults(
+        HandLocalScaniverseOcclusion occlusion,
+        bool created,
+        Transform[] targets,
+        string[] rootNameContains,
+        bool autoFindRoots)
     {
         if (occlusion == null)
             return;
 
-        occlusion.autoFindScaniverseRoots = true;
-        occlusion.scaniverseRoots = null;
+        occlusion.autoFindScaniverseRoots = autoFindRoots;
+        occlusion.scaniverseRoots = targets;
         occlusion.scaniverseRenderers = null;
-        occlusion.autoFindNameContains = OcclusionScaniverseRootNames;
+        occlusion.autoFindNameContains = rootNameContains ?? System.Array.Empty<string>();
         occlusion.onlyApplyOverlayToNamedRootChildren = true;
         occlusion.scaniverseMeshRootNameEquals = new[] { "Root", "root" };
-        occlusion.fullRootOverlayNameContains = new[] { SceneMatchedScaniverseRootName };
+        occlusion.fullRootOverlayNameContains = targets != null && targets.Length > 0
+            ? GetTargetNames(targets)
+            : new[] { SceneMatchedScaniverseRootName };
         occlusion.respectInactiveScaniverseRoots = true;
         occlusion.enableNonSelectedChildrenUnderScaniverseRoots = true;
         occlusion.doNotAutoEnableNameEquals = new[] { "Root", "root" };
@@ -237,6 +350,22 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         occlusion.hideOriginalScaniverseRenderers = true;
         occlusion.destroyGeneratedOverlayOnDisable = true;
         occlusion.pruneOldHandOverlayLogs = true;
+    }
+
+    private static string[] GetTargetNames(Transform[] targets)
+    {
+        if (targets == null || targets.Length == 0)
+            return System.Array.Empty<string>();
+
+        var names = new System.Collections.Generic.List<string>(targets.Length);
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Transform target = targets[i];
+            if (target != null && !names.Contains(target.name))
+                names.Add(target.name);
+        }
+
+        return names.ToArray();
     }
 
     private static void EnsureAnchorPlacementSceneFader()

@@ -24,6 +24,10 @@ public class DeskScaleSliderPanel : MonoBehaviour
     public bool applyToDepthScale = true;
 
     [Header("Scaled Scene Objects")]
+    [Tooltip("Optional explicit desk used as the primary width/depth reference. Assigning this is the easiest way to use a newly added desk. It is also scaled by the slider.")]
+    public Transform primaryDeskReference;
+    [Tooltip("Explicit Scaniverse room roots whose horizontal mesh should deform with the primary desk footprint. When empty, Scaniverse Root Name is used as a fallback.")]
+    public Transform[] scaniverseDeformationRoots = new Transform[0];
     public bool autoFindScaniverseMinitable = true;
     public string scaniverseRootName = "Scaniverse 2026-06-17 213301";
     public string minitableName = "minitable";
@@ -109,6 +113,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
     private Matrix4x4 dragTrackWorldToLocal;
     private bool hasDragTrackFrame;
     private readonly List<ScaniverseMeshState> scaniverseMeshStates = new List<ScaniverseMeshState>();
+    private readonly ScaledObject explicitPrimaryDeskState = new ScaledObject();
     private Transform uiFollowDesk;
     private Vector3 deskSliderInitialDeskLocalPosition;
     private Vector3 deskSliderInitialParentLocalPosition;
@@ -133,6 +138,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
     private sealed class ScaniverseMeshState
     {
+        public Transform deformationRoot;
         public MeshFilter meshFilter;
         public Mesh mesh;
         public Vector3[] originalVertices;
@@ -452,33 +458,49 @@ public class DeskScaleSliderPanel : MonoBehaviour
     {
         CaptureMissingInitialScales();
 
+        ScaledObject explicitDesk = GetExplicitPrimaryDeskState();
+        ApplyScaleToSceneObject(explicitDesk);
+
         if (scaledObjects == null)
+        {
+            ApplyUiFollowPositions();
             return;
+        }
 
         for (int i = 0; i < scaledObjects.Length; i++)
         {
             ScaledObject scaled = scaledObjects[i];
-            if (scaled == null || scaled.target == null)
+            if (scaled == null || scaled.target == null || IsSameTarget(scaled, explicitDesk))
                 continue;
 
-            float referenceScale = Mathf.Max(0.001f, sceneObjectReferenceScale);
-            float factor = currentScale / referenceScale;
-            scaled.target.localScale = new Vector3(
-                scaled.initialLocalScale.x * factor,
-                keepSceneObjectHeight ? scaled.initialLocalScale.y : scaled.initialLocalScale.y * factor,
-                scaled.initialLocalScale.z * factor);
-
-            if (keepSeatedSideEdgeFixed)
-                scaled.target.localPosition = scaled.initialLocalPosition + ComputeFixedEdgeOffset(scaled, factor);
+            ApplyScaleToSceneObject(scaled);
         }
 
         ApplyUiFollowPositions();
+    }
+
+    private void ApplyScaleToSceneObject(ScaledObject scaled)
+    {
+        if (scaled == null || scaled.target == null)
+            return;
+
+        float referenceScale = Mathf.Max(0.001f, sceneObjectReferenceScale);
+        float factor = currentScale / referenceScale;
+        scaled.target.localScale = new Vector3(
+            scaled.initialLocalScale.x * factor,
+            keepSceneObjectHeight ? scaled.initialLocalScale.y : scaled.initialLocalScale.y * factor,
+            scaled.initialLocalScale.z * factor);
+
+        if (keepSeatedSideEdgeFixed)
+            scaled.target.localPosition = scaled.initialLocalPosition + ComputeFixedEdgeOffset(scaled, factor);
     }
 
     private void CaptureMissingInitialScales()
     {
         AutoFindMinitableIfNeeded();
 
+        CaptureMissingInitialScale(GetExplicitPrimaryDeskState());
+
         if (scaledObjects == null)
             return;
 
@@ -487,15 +509,24 @@ public class DeskScaleSliderPanel : MonoBehaviour
             ScaledObject scaled = scaledObjects[i];
             if (scaled == null || scaled.target == null)
                 continue;
-            if (scaled.initialLocalScale.sqrMagnitude <= 1e-8f)
-                scaled.initialLocalScale = scaled.target.localScale;
-            if (IsZeroQuaternion(scaled.initialLocalRotation))
-                scaled.initialLocalRotation = scaled.target.localRotation;
-            if (!scaled.hasInitialLocalBounds)
-            {
-                scaled.initialLocalPosition = scaled.target.localPosition;
-                scaled.hasInitialLocalBounds = TryGetLocalRenderBounds(scaled.target, out scaled.initialLocalBoundsMin, out scaled.initialLocalBoundsMax);
-            }
+
+            CaptureMissingInitialScale(scaled);
+        }
+    }
+
+    private static void CaptureMissingInitialScale(ScaledObject scaled)
+    {
+        if (scaled == null || scaled.target == null)
+            return;
+
+        if (scaled.initialLocalScale.sqrMagnitude <= 1e-8f)
+            scaled.initialLocalScale = scaled.target.localScale;
+        if (IsZeroQuaternion(scaled.initialLocalRotation))
+            scaled.initialLocalRotation = scaled.target.localRotation;
+        if (!scaled.hasInitialLocalBounds)
+        {
+            scaled.initialLocalPosition = scaled.target.localPosition;
+            scaled.hasInitialLocalBounds = TryGetLocalRenderBounds(scaled.target, out scaled.initialLocalBoundsMin, out scaled.initialLocalBoundsMax);
         }
     }
 
@@ -504,23 +535,37 @@ public class DeskScaleSliderPanel : MonoBehaviour
     {
         AutoFindMinitableIfNeeded();
 
+        CaptureSceneObjectBaseline(GetExplicitPrimaryDeskState());
+
         if (scaledObjects == null)
+        {
+            ResetScaniverseMeshCache();
+            CaptureUiFollowBaselines(true);
             return;
+        }
 
         for (int i = 0; i < scaledObjects.Length; i++)
         {
             ScaledObject scaled = scaledObjects[i];
-            if (scaled == null || scaled.target == null)
+            if (scaled == null || scaled.target == null || IsSameTarget(scaled, explicitPrimaryDeskState))
                 continue;
 
-            scaled.initialLocalScale = scaled.target.localScale;
-            scaled.initialLocalPosition = scaled.target.localPosition;
-            scaled.initialLocalRotation = scaled.target.localRotation;
-            scaled.hasInitialLocalBounds = TryGetLocalRenderBounds(scaled.target, out scaled.initialLocalBoundsMin, out scaled.initialLocalBoundsMax);
+            CaptureSceneObjectBaseline(scaled);
         }
 
         ResetScaniverseMeshCache();
         CaptureUiFollowBaselines(true);
+    }
+
+    private static void CaptureSceneObjectBaseline(ScaledObject scaled)
+    {
+        if (scaled == null || scaled.target == null)
+            return;
+
+        scaled.initialLocalScale = scaled.target.localScale;
+        scaled.initialLocalPosition = scaled.target.localPosition;
+        scaled.initialLocalRotation = scaled.target.localRotation;
+        scaled.hasInitialLocalBounds = TryGetLocalRenderBounds(scaled.target, out scaled.initialLocalBoundsMin, out scaled.initialLocalBoundsMax);
     }
 
     private void CaptureUiFollowBaselines(bool force)
@@ -601,6 +646,10 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
     private ScaledObject GetPrimaryScaledObject()
     {
+        ScaledObject explicitDesk = GetExplicitPrimaryDeskState();
+        if (explicitDesk != null)
+            return explicitDesk;
+
         if (scaledObjects == null)
             return null;
 
@@ -613,9 +662,39 @@ public class DeskScaleSliderPanel : MonoBehaviour
         return null;
     }
 
+    private ScaledObject GetExplicitPrimaryDeskState()
+    {
+        if (primaryDeskReference == null)
+        {
+            explicitPrimaryDeskState.target = null;
+            return null;
+        }
+
+        if (explicitPrimaryDeskState.target != primaryDeskReference)
+        {
+            explicitPrimaryDeskState.target = primaryDeskReference;
+            explicitPrimaryDeskState.initialLocalScale = Vector3.zero;
+            explicitPrimaryDeskState.initialLocalPosition = Vector3.zero;
+            explicitPrimaryDeskState.initialLocalRotation = Quaternion.identity;
+            explicitPrimaryDeskState.initialLocalBoundsMin = Vector3.zero;
+            explicitPrimaryDeskState.initialLocalBoundsMax = Vector3.zero;
+            explicitPrimaryDeskState.hasInitialLocalBounds = false;
+        }
+
+        return explicitPrimaryDeskState;
+    }
+
+    private static bool IsSameTarget(ScaledObject left, ScaledObject right)
+    {
+        return left != null
+            && right != null
+            && left.target != null
+            && left.target == right.target;
+    }
+
     private void AutoFindMinitableIfNeeded()
     {
-        if (!autoFindScaniverseMinitable || HasScaledTarget())
+        if (primaryDeskReference != null || !autoFindScaniverseMinitable || HasScaledTarget())
             return;
 
         Transform root = FindSceneTransformByName(scaniverseRootName, null);
@@ -740,24 +819,40 @@ public class DeskScaleSliderPanel : MonoBehaviour
         if (desk == null || desk.target == null || !desk.hasInitialLocalBounds)
             return;
 
-        Transform scaniverseRoot = FindSceneTransformByName(scaniverseRootName, null);
-        if (scaniverseRoot == null)
-            return;
+        float referenceScale = Mathf.Max(0.001f, sceneObjectReferenceScale);
+        float widthFactor = applyToWidthScale ? currentScale / referenceScale : 1f;
+        float depthFactor = applyToDepthScale ? currentScale / referenceScale : 1f;
+        TryReadControllerScaleFactors(referenceScale, ref widthFactor, ref depthFactor);
 
-        EnsureScaniverseMeshCache(scaniverseRoot);
-        if (scaniverseMeshStates.Count == 0)
+        if (HasExplicitScaniverseDeformationRoots())
+        {
+            for (int i = 0; i < scaniverseDeformationRoots.Length; i++)
+            {
+                Transform root = scaniverseDeformationRoots[i];
+                if (root != null)
+                    ApplyScaniverseRoomDeformationToRoot(desk, root, widthFactor, depthFactor);
+            }
             return;
+        }
+
+        Transform fallbackRoot = FindSceneTransformByName(scaniverseRootName, null);
+        if (fallbackRoot != null)
+            ApplyScaniverseRoomDeformationToRoot(desk, fallbackRoot, widthFactor, depthFactor);
+    }
+
+    private void ApplyScaniverseRoomDeformationToRoot(
+        ScaledObject desk,
+        Transform scaniverseRoot,
+        float widthFactor,
+        float depthFactor)
+    {
+        EnsureScaniverseMeshCache(scaniverseRoot);
 
         Matrix4x4 initialDeskLocalToRootLocal;
         if (!TryGetInitialDeskLocalToRootLocal(desk, scaniverseRoot, out initialDeskLocalToRootLocal))
             return;
 
         Matrix4x4 rootLocalToInitialDeskLocal = initialDeskLocalToRootLocal.inverse;
-        float referenceScale = Mathf.Max(0.001f, sceneObjectReferenceScale);
-        float widthFactor = applyToWidthScale ? currentScale / referenceScale : 1f;
-        float depthFactor = applyToDepthScale ? currentScale / referenceScale : 1f;
-        TryReadControllerScaleFactors(referenceScale, ref widthFactor, ref depthFactor);
-
         BoundsEdges edges = new BoundsEdges(desk.initialLocalBoundsMin, desk.initialLocalBoundsMax);
         Vector3 fixedCoordinate = ResolveFixedScaleCoordinate(desk, scaniverseRoot, rootLocalToInitialDeskLocal, edges);
         Matrix4x4 rootLocalToWorld = scaniverseRoot.localToWorldMatrix;
@@ -765,7 +860,11 @@ public class DeskScaleSliderPanel : MonoBehaviour
         for (int stateIndex = 0; stateIndex < scaniverseMeshStates.Count; stateIndex++)
         {
             ScaniverseMeshState state = scaniverseMeshStates[stateIndex];
-            if (state == null || state.meshFilter == null || state.mesh == null || state.originalVertices == null)
+            if (state == null
+                || state.deformationRoot != scaniverseRoot
+                || state.meshFilter == null
+                || state.mesh == null
+                || state.originalVertices == null)
                 continue;
 
             Matrix4x4 meshLocalToRootLocal = worldToRootLocal * state.meshFilter.transform.localToWorldMatrix;
@@ -793,19 +892,23 @@ public class DeskScaleSliderPanel : MonoBehaviour
         }
     }
 
-    private ScaledObject FindPrimaryScaledObject()
+    private bool HasExplicitScaniverseDeformationRoots()
     {
-        if (scaledObjects == null)
-            return null;
+        if (scaniverseDeformationRoots == null)
+            return false;
 
-        for (int i = 0; i < scaledObjects.Length; i++)
+        for (int i = 0; i < scaniverseDeformationRoots.Length; i++)
         {
-            ScaledObject scaled = scaledObjects[i];
-            if (scaled != null && scaled.target != null)
-                return scaled;
+            if (scaniverseDeformationRoots[i] != null)
+                return true;
         }
 
-        return null;
+        return false;
+    }
+
+    private ScaledObject FindPrimaryScaledObject()
+    {
+        return GetPrimaryScaledObject();
     }
 
     private void TryReadControllerScaleFactors(float referenceScale, ref float widthFactor, ref float depthFactor)
@@ -917,6 +1020,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
             ScaniverseMeshState state = new ScaniverseMeshState
             {
+                deformationRoot = scaniverseRoot,
                 meshFilter = filter,
                 mesh = mesh,
                 originalVertices = mesh.vertices,
@@ -940,13 +1044,24 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
     private bool IsScaledObjectHierarchy(Transform transformToCheck)
     {
-        if (transformToCheck == null || scaledObjects == null)
+        if (transformToCheck == null)
+            return false;
+
+        ScaledObject explicitDesk = GetExplicitPrimaryDeskState();
+        if (explicitDesk != null
+            && explicitDesk.target != null
+            && (transformToCheck == explicitDesk.target || transformToCheck.IsChildOf(explicitDesk.target)))
+            return true;
+
+        if (scaledObjects == null)
             return false;
 
         for (int i = 0; i < scaledObjects.Length; i++)
         {
             ScaledObject scaled = scaledObjects[i];
-            if (scaled != null && scaled.target != null && transformToCheck.IsChildOf(scaled.target))
+            if (scaled != null
+                && scaled.target != null
+                && (transformToCheck == scaled.target || transformToCheck.IsChildOf(scaled.target)))
                 return true;
         }
 
