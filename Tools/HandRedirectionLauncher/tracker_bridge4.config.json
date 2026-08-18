@@ -1,0 +1,15 @@
+{
+  "questIp": "10.100.147.142",
+  "questPort": 9000,
+  "ackPort": 9001,
+  "hz": 60,
+  "referenceSerial": "LHR-F3729A54",
+  "headSerial": "",
+  "objectSerials": {
+    "LHR-D829CE8A": 1,
+    "LHR-B239B48C": 2,
+    "LHR-3780EB25": 3,
+    "LHR-A44246FF": 4
+  },
+  "applyStsToUnity": true
+}
