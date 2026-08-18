@@ -2,7 +2,7 @@
   "steamVrMonitorPath": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\SteamVR\\bin\\win64\\vrmonitor.exe",
   "trackerBridgeDirectory": "D:\\tracker_bridge",
   "trackerBridgePython": "D:\\tracker_bridge\\.venv\\Scripts\\python.exe",
-  "trackerBridgeScript": "D:\\tracker_bridge\\tracker_bridge4.py",
+  "trackerBridgeScript": "Tools\\HandRedirectionLauncher\\tracker_bridge4.py",
   "trackerBridgeConfig": "Tools\\HandRedirectionLauncher\\tracker_bridge4.config.json",
   "standaloneQuestIp": "10.100.147.142",
   "defaultMode": "Quest Link / Unity Editor"
