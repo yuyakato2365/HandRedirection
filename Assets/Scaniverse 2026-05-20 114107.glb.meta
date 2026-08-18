@@ -1,0 +1,22 @@
+fileFormatVersion: 2
+guid: 5888e79e29616d447bc245a8f1eab972
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: main
+    second: {fileID: 2100000, guid: ff50ad0127b67ee4a8d2046af86de3b1, type: 2}
+  - first:
+      type: UnityEngine:Texture
+      assembly: UnityEngine.CoreModule
+      name: texture.jpg
+    second: {fileID: 2800000, guid: f5946a2fd26192b44be30b1d17d1298f, type: 3}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: cc45016b844e7624dae3aec10fb443ea, type: 3}
+  reverseAxis: 0
+  renderPipeline: 0

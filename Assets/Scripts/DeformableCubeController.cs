@@ -618,6 +618,11 @@ public class DeformableCubeController : MonoBehaviour
     public Vector3 minScale = new Vector3(0.2f, 0.2f, 0.2f);
     public Vector3 maxScale = new Vector3(5f, 5f, 5f);
 
+    [Header("Audio Feedback")]
+    public bool playScaleAudioFeedback = true;
+    public float scaleAudioIntervalSec = 0.25f;
+    public float scaleAudioDeltaThreshold = 0.01f;
+
     [Header("Handle Cache (optional)")]
     [Tooltip("空なら自動でこのオブジェクト配下から DeformHandle を集める")]
     public DeformHandle[] allHandles;
@@ -633,6 +638,8 @@ public class DeformableCubeController : MonoBehaviour
     Vector3 _scale0;
     float _d0;
     bool _pendingBaseline = false;
+    float _nextScaleAudioTime;
+    float _lastScaleAudioMagnitude;
 
     readonly HashSet<DeformHandle> _hovered = new HashSet<DeformHandle>();
     readonly HashSet<DeformHandle> _ownedHandleSet = new HashSet<DeformHandle>();
@@ -839,6 +846,8 @@ public class DeformableCubeController : MonoBehaviour
     {
         _mode = m;
         _scale0 = cubeWarped.localScale;
+        _lastScaleAudioMagnitude = AverageScaleMagnitude(_scale0);
+        PlayScaleAudioCue(ExhibitionAudioFeedback.Cue.ScaleStart);
 
         _d0 = MeasureDistanceForMode(m);
         if (_d0 < 1e-4f)
@@ -911,6 +920,35 @@ public class DeformableCubeController : MonoBehaviour
         );
 
         cubeWarped.localScale = s;
+        UpdateScaleAudioFeedback(s);
+    }
+
+    void UpdateScaleAudioFeedback(Vector3 newScale)
+    {
+        if (!playScaleAudioFeedback || Time.realtimeSinceStartup < _nextScaleAudioTime)
+            return;
+
+        float magnitude = AverageScaleMagnitude(newScale);
+        float delta = magnitude - _lastScaleAudioMagnitude;
+        if (Mathf.Abs(delta) < scaleAudioDeltaThreshold)
+            return;
+
+        PlayScaleAudioCue(delta > 0f ? ExhibitionAudioFeedback.Cue.ScaleUp : ExhibitionAudioFeedback.Cue.ScaleDown);
+        _lastScaleAudioMagnitude = magnitude;
+        _nextScaleAudioTime = Time.realtimeSinceStartup + Mathf.Max(0.02f, scaleAudioIntervalSec);
+    }
+
+    void PlayScaleAudioCue(ExhibitionAudioFeedback.Cue cue)
+    {
+        if (!playScaleAudioFeedback)
+            return;
+
+        ExhibitionAudioFeedback.PlayCue(cue);
+    }
+
+    static float AverageScaleMagnitude(Vector3 scale)
+    {
+        return (scale.x + scale.y + scale.z) / 3f;
     }
 
     void ResetDeform()
