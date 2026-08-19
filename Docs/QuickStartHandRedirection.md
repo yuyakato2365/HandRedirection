@@ -5,9 +5,9 @@
 1. QuestをPCへ接続し、Quest Linkを開始します。
 2. プロジェクト直下の`StartHandRedirection.cmd`をダブルクリックします。
 3. `Quest Link / Unity Editor`を選びます。Quest単体ビルドへ送る場合だけ`Standalone Quest`を選び、QuestのIPを入力します。
-4. `Start SteamVR + Tracker Bridge`を押します。
+4. `Start All + Unity Play`を押します。SteamVR、Tracker Bridge、UnityのPlayがまとめて開始されます。
 5. SteamVRでHMDと使用するVive Trackerが認識されるまで待ちます。
-6. Unityで対象Sceneを開き、Playを押します。
+6. UnityがPlayモードへ入ったことを確認します。
 7. 同じControl Centerの`Setup & Anchor`タブを上から順に操作します。
    - `1. Begin Anchor Placement`
    - Quest内で位置を合わせる
@@ -19,8 +19,8 @@
 
 ## 終了
 
-1. UnityのPlayを停止します。
-2. Launcherの`Stop Tracker Bridge`を押します。
+1. Control Centerの`Stop Unity + Bridge`を押します。
+2. UnityのPlayとTracker Bridgeが停止したことを確認します。
 3. SteamVRが不要ならSteamVR側で終了します。
 
 ## 補助操作

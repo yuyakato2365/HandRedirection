@@ -5,6 +5,7 @@ Add-Type -AssemblyName System.Drawing
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $cfg=Get-Content (Join-Path $PSScriptRoot 'launcher.config.json') -Raw|ConvertFrom-Json
 $pidFile=Join-Path $root 'Temp\tracker_bridge4.pid'; $logDir=Join-Path $root 'Logs\TrackerBridge'
+$editorCommandFile=Join-Path $root 'Temp\hand_redirection_editor_command.txt'
 $cmdPort=9101; $statusPort=9102; $statusClient=$null
 $bg=[Drawing.ColorTranslator]::FromHtml('#F3F6FB');$white=[Drawing.Color]::White
 $navy=[Drawing.ColorTranslator]::FromHtml('#17233C');$ink=[Drawing.ColorTranslator]::FromHtml('#1F2937')
@@ -29,6 +30,12 @@ function StartServices{
  Set-Content $pidFile $p.Id -Encoding ascii
 }
 function StopBridge{$p=BridgeProcess;if($p){Stop-Process $p.Id};if(Test-Path $pidFile){Remove-Item $pidFile -Force};Log 'Tracker Bridge stopped.'}
+function UnityEditorCommand($command){
+ New-Item -ItemType Directory (Split-Path $editorCommandFile) -Force|Out-Null
+ $sentAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+ Set-Content -LiteralPath $editorCommandFile -Value ("{0}|{1}" -f $command,$sentAt) -Encoding ascii
+ Log "Unity Editor command: $command"
+}
 function Send($s){try{$hostName=TargetIp;if([string]::IsNullOrWhiteSpace($hostName)){throw 'Quest IP is empty.'};$u=[Net.Sockets.UdpClient]::new();$b=[Text.Encoding]::UTF8.GetBytes($s);[void]$u.Send($b,$b.Length,$hostName,$cmdPort);$u.Close();Log "Sent: $s"}catch{Message $_.Exception.Message $true;Log "Send failed: $($_.Exception.Message)"}}
 function Status{$a=$null-ne(Get-Process vrserver,vrmonitor -ErrorAction SilentlyContinue);$b=$null-ne(BridgeProcess);$steam.Text=if($a){'[ON] SteamVR  RUNNING'}else{'[--] SteamVR  STOPPED'};$steam.ForeColor=if($a){$green}else{$muted};$bridge.Text=if($b){'[ON] Tracker Bridge  RUNNING'}else{'[--] Tracker Bridge  STOPPED'};$bridge.ForeColor=if($b){$green}else{$muted}}
 function OffsetStatus($s){$p=$s -split '\s+';if($p.Count -ne 8 -or $p[0] -ne 'TRACKER_OFFSET'){return};foreach($r in $grid.Rows){if([int]$r.Cells[0].Value -eq [int]$p[1]){for($i=0;$i -lt 6;$i++){$r.Cells[$i+2].Value=$p[$i+2]};$r.DefaultCellStyle.BackColor=[Drawing.ColorTranslator]::FromHtml('#ECFDF5')}}}
@@ -44,7 +51,7 @@ $setup=[Windows.Forms.TabPage]::new('  Setup & Anchor  ');$setup.BackColor=$bg;$
 $c=Card 14 16 880 154;$setup.Controls.Add($c);$h=Label '1  CONNECTION' 20 12 250;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$c.Controls.Add($h);$c.Controls.Add((Label 'Run mode' 20 50 85))
 $mode=[Windows.Forms.ComboBox]::new();$mode.DropDownStyle='DropDownList';$mode.Location=[Drawing.Point]::new(110,48);$mode.Size=[Drawing.Size]::new(250,28);[void]$mode.Items.Add('Quest Link / Unity Editor');[void]$mode.Items.Add('Standalone Quest');$mode.SelectedItem=[string]$cfg.defaultMode;$c.Controls.Add($mode)
 $ipLabel=Label 'Quest IP' 385 50 70;$c.Controls.Add($ipLabel);$ip=[Windows.Forms.TextBox]::new();$ip.Text=[string]$cfg.standaloneQuestIp;$ip.Location=[Drawing.Point]::new(458,48);$ip.Size=[Drawing.Size]::new(175,27);$c.Controls.Add($ip)
-$start=Button 'Start SteamVR + Tracker Bridge' 655 39 205 44 $true;$c.Controls.Add($start);$stop=Button 'Stop Bridge' 655 94 205 34 $false $true;$c.Controls.Add($stop)
+$start=Button 'Start All + Unity Play' 655 39 205 44 $true;$c.Controls.Add($start);$stop=Button 'Stop Unity + Bridge' 655 94 205 34 $false $true;$c.Controls.Add($stop)
 $steam=Label '[--] SteamVR  STOPPED' 20 101 220;$steam.Font=[Drawing.Font]::new('Segoe UI Semibold',9.5);$c.Controls.Add($steam);$bridge=Label '[--] Tracker Bridge  STOPPED' 250 101 250;$bridge.Font=$steam.Font;$c.Controls.Add($bridge);$ping=Button 'Ping Unity' 520 94 113 34;$ping.Add_Click({Send 'PING'});$c.Controls.Add($ping)
 $w=Card 14 184 880 379;$setup.Controls.Add($w);$h=Label '2  SPATIAL ANCHOR WORKFLOW' 20 12 330;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$w.Controls.Add($h);$q=Label 'After pressing Play in Unity, complete these steps from top to bottom.' 365 15 470;$q.ForeColor=$muted;$w.Controls.Add($q)
 $b=Button '1. Begin Anchor Placement' 20 54 405 48 $true;$b.Add_Click({Send 'BEGIN_ANCHOR_PLACEMENT'});$w.Controls.Add($b);$b=Button '2. Confirm Anchor' 445 54 405 48 $true;$b.Add_Click({Send 'CONFIRM_ANCHOR_PLACEMENT'});$w.Controls.Add($b)
@@ -69,13 +76,14 @@ $start.Add_Click({
     try {
         if ([string]::IsNullOrWhiteSpace((TargetIp))) { throw 'Quest IP is empty.' }
         StartServices
-        Message 'Services started. Press Play in Unity, then use step 1.'
+        UnityEditorCommand 'PLAY'
+        Message 'Services started and Unity Play requested. Continue with step 1.'
         Log 'Services start requested.'
         Status
     }
     catch { Message $_.Exception.Message $true; Log $_.Exception.Message }
 })
-$stop.Add_Click({ StopBridge; Status })
+$stop.Add_Click({ UnityEditorCommand 'STOP'; StopBridge; Status })
 $timer = [Windows.Forms.Timer]::new()
 $timer.Interval = 250
 $timer.Add_Tick({ Poll; Status })
