@@ -119,6 +119,9 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
         slider.minitableName = desk.name;
         slider.scaledObjects = Array.Empty<DeskScaleSliderPanel.ScaledObject>();
         slider.recaptureSceneObjectBaselineOnStart = true;
+        slider.deformScaniverseRoomWithDeskScale = true;
+        slider.deformScaniverseWidthBand = true;
+        slider.deformScaniverseDepthBand = true;
 
         EditorUtility.SetDirty(guard);
         EditorUtility.SetDirty(slider);
@@ -171,10 +174,13 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
             && slider.primaryDeskReference == desk
             && slider.scaniverseDeformationRoots != null
             && slider.scaniverseDeformationRoots.Length == 1
-            && slider.scaniverseDeformationRoots[0] == room3Dgs;
+            && slider.scaniverseDeformationRoots[0] == room3Dgs
+            && slider.deformScaniverseRoomWithDeskScale
+            && slider.deformScaniverseWidthBand
+            && slider.deformScaniverseDepthBand;
 
         validationMessage = referencesApplied
-            ? $"Ready. Room='{room3Dgs.name}', Desk='{desk.name}'. All authoritative references are assigned; renaming either object is safe. Save the scene."
+            ? $"Ready. Room='{room3Dgs.name}', Desk='{desk.name}'. References are assigned and the room's desk-width/depth bands will deform with the desk. Renaming either object is safe. Save the scene."
             : applied
                 ? "Apply did not produce the expected references. Check the Console."
                 : $"Detected Room='{room3Dgs.name}', Desk='{desk.name}'. Press Apply + Validate to remove name dependence.";

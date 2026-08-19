@@ -812,9 +812,6 @@ public class DeskScaleSliderPanel : MonoBehaviour
             RestoreScaniverseMeshes();
             return;
         }
-        if (scaledObjects == null || scaledObjects.Length == 0)
-            return;
-
         ScaledObject desk = FindPrimaryScaledObject();
         if (desk == null || desk.target == null || !desk.hasInitialLocalBounds)
             return;
