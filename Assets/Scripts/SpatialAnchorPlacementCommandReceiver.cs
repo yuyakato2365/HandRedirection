@@ -192,6 +192,9 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         if (logCommands)
             Debug.Log($"[SpatialAnchorPlacementCommandReceiver] Command: {normalized}");
 
+        if (TryHandleTrackerOffsetCommand(normalized))
+            return;
+
         if (placer == null)
         {
             SendStatus("ERROR placer_not_assigned");
@@ -471,6 +474,108 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         controller = obj.AddComponent<PassthroughScaniverseModeController>();
         passthroughScaniverseModeController = controller;
         return true;
+    }
+
+    private bool TryHandleTrackerOffsetCommand(string command)
+    {
+        string[] parts = command.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return false;
+
+        if (parts[0] == "GET_TRACKER_OFFSETS")
+        {
+            TrackerToCubeOffsetCalibrator3 calibrator = FindTrackerCalibrator();
+            if (calibrator == null)
+            {
+                SendStatus("ERROR tracker_calibrator_not_found");
+                return true;
+            }
+
+            int count = 0;
+            foreach (TrackerToCubeOffsetCalibrator3.TargetEntry target in calibrator.EnumerateTargetOffsets())
+            {
+                if (target == null)
+                    continue;
+                SendTrackerOffsetStatus(target.objectId, target.centerOffsetInTracker, target.centerEulerOffset);
+                count++;
+            }
+            SendStatus($"TRACKER_OFFSETS_DONE {count}");
+            return true;
+        }
+
+        if (parts[0] == "SET_TRACKER_OFFSET")
+        {
+            if (parts.Length != 8 ||
+                !uint.TryParse(parts[1], out uint objectId) ||
+                !TryParseInvariant(parts[2], out float px) ||
+                !TryParseInvariant(parts[3], out float py) ||
+                !TryParseInvariant(parts[4], out float pz) ||
+                !TryParseInvariant(parts[5], out float ex) ||
+                !TryParseInvariant(parts[6], out float ey) ||
+                !TryParseInvariant(parts[7], out float ez))
+            {
+                SendStatus("ERROR tracker_offset_format");
+                return true;
+            }
+
+            TrackerToCubeOffsetCalibrator3 calibrator = FindTrackerCalibrator();
+            if (calibrator == null || !calibrator.TrySetTargetOffset(
+                    objectId,
+                    new Vector3(px, py, pz),
+                    new Vector3(ex, ey, ez)))
+            {
+                SendStatus($"ERROR tracker_target_not_found {objectId}");
+                return true;
+            }
+
+            SendTrackerOffsetStatus(objectId, new Vector3(px, py, pz), new Vector3(ex, ey, ez));
+            return true;
+        }
+
+        if (parts[0] == "RESET_TRACKER_OFFSET")
+        {
+            if (parts.Length != 2 || !uint.TryParse(parts[1], out uint objectId))
+            {
+                SendStatus("ERROR tracker_offset_format");
+                return true;
+            }
+
+            TrackerToCubeOffsetCalibrator3 calibrator = FindTrackerCalibrator();
+            if (calibrator == null || !calibrator.TrySetTargetOffset(objectId, Vector3.zero, Vector3.zero))
+            {
+                SendStatus($"ERROR tracker_target_not_found {objectId}");
+                return true;
+            }
+
+            SendTrackerOffsetStatus(objectId, Vector3.zero, Vector3.zero);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseInvariant(string value, out float result)
+    {
+        return float.TryParse(
+            value,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out result);
+    }
+
+    private static TrackerToCubeOffsetCalibrator3 FindTrackerCalibrator()
+    {
+        return FindAnyObjectByType<TrackerToCubeOffsetCalibrator3>(FindObjectsInactive.Include);
+    }
+
+    private void SendTrackerOffsetStatus(uint objectId, Vector3 position, Vector3 euler)
+    {
+        SendStatus(string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "TRACKER_OFFSET {0} {1:R} {2:R} {3:R} {4:R} {5:R} {6:R}",
+            objectId,
+            position.x, position.y, position.z,
+            euler.x, euler.y, euler.z));
     }
 
     private bool TryGetHandRedirectorManager(out GoGoInteractionController_NoY3 controller)

@@ -42,6 +42,20 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
         public Vector3 objectDeskPositionOffset = Vector3.zero;
     }
 
+    [Serializable]
+    private class SavedTargetOffset
+    {
+        public uint objectId;
+        public Vector3 centerOffsetInTracker;
+        public Vector3 centerEulerOffset;
+    }
+
+    [Serializable]
+    private class SavedTargetOffsetCollection
+    {
+        public List<SavedTargetOffset> entries = new List<SavedTargetOffset>();
+    }
+
     private struct RelativePose
     {
         public long nowMs;
@@ -102,6 +116,12 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     [Tooltip("Objects driven by REL0 packets.")]
     public List<TargetEntry> targets = new List<TargetEntry>();
 
+    [Header("Runtime Offset Persistence")]
+    [Tooltip("Save per-object tracker offsets changed from the PC control window.")]
+    public bool persistRuntimeTargetOffsets = true;
+
+    public string targetOffsetsPlayerPrefsKey = "HandRedirection.TrackerTargetOffsets";
+
     [Header("DeskOrigin Object Group Offset")]
     [Tooltip("DeskOrigin-local position offset applied to every target object after tracker-specific offsets. Use this to move the whole object set relative to DeskOrigin axes.")]
     public Vector3 objectGroupDeskPositionOffset = Vector3.zero;
@@ -130,6 +150,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
     private void Start()
     {
+        LoadTargetOffsetsFromPrefs();
         ValidateConfiguration();
 
         try
@@ -159,6 +180,99 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             Debug.LogError($"[TrackerToCubeOffsetCalibrator3] UDP init failed: {e}");
             running = false;
         }
+    }
+
+    public bool TrySetTargetOffset(uint objectId, Vector3 positionOffset, Vector3 eulerOffset, bool save = true)
+    {
+        TargetEntry target = FindTarget(objectId);
+        if (target == null)
+            return false;
+
+        target.centerOffsetInTracker = positionOffset;
+        target.centerEulerOffset = eulerOffset;
+        if (save)
+            SaveTargetOffsetsToPrefs();
+        return true;
+    }
+
+    public bool TryGetTargetOffset(uint objectId, out Vector3 positionOffset, out Vector3 eulerOffset)
+    {
+        TargetEntry target = FindTarget(objectId);
+        if (target == null)
+        {
+            positionOffset = Vector3.zero;
+            eulerOffset = Vector3.zero;
+            return false;
+        }
+
+        positionOffset = target.centerOffsetInTracker;
+        eulerOffset = target.centerEulerOffset;
+        return true;
+    }
+
+    public IEnumerable<TargetEntry> EnumerateTargetOffsets()
+    {
+        return targets ?? new List<TargetEntry>();
+    }
+
+    public void SaveTargetOffsetsToPrefs()
+    {
+        if (!persistRuntimeTargetOffsets || string.IsNullOrWhiteSpace(targetOffsetsPlayerPrefsKey))
+            return;
+
+        var saved = new SavedTargetOffsetCollection();
+        if (targets != null)
+        {
+            foreach (TargetEntry target in targets)
+            {
+                if (target == null)
+                    continue;
+                saved.entries.Add(new SavedTargetOffset
+                {
+                    objectId = target.objectId,
+                    centerOffsetInTracker = target.centerOffsetInTracker,
+                    centerEulerOffset = target.centerEulerOffset
+                });
+            }
+        }
+
+        PlayerPrefs.SetString(targetOffsetsPlayerPrefsKey, JsonUtility.ToJson(saved));
+        PlayerPrefs.Save();
+    }
+
+    public void LoadTargetOffsetsFromPrefs()
+    {
+        if (!persistRuntimeTargetOffsets || string.IsNullOrWhiteSpace(targetOffsetsPlayerPrefsKey))
+            return;
+
+        string json = PlayerPrefs.GetString(targetOffsetsPlayerPrefsKey, "");
+        if (string.IsNullOrWhiteSpace(json))
+            return;
+
+        try
+        {
+            SavedTargetOffsetCollection saved = JsonUtility.FromJson<SavedTargetOffsetCollection>(json);
+            if (saved?.entries == null)
+                return;
+
+            foreach (SavedTargetOffset entry in saved.entries)
+            {
+                TargetEntry target = FindTarget(entry.objectId);
+                if (target == null)
+                    continue;
+                target.centerOffsetInTracker = entry.centerOffsetInTracker;
+                target.centerEulerOffset = entry.centerEulerOffset;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[TrackerToCubeOffsetCalibrator3] Failed to load target offsets: {e.Message}");
+        }
+    }
+
+    private TargetEntry FindTarget(uint objectId)
+    {
+        return targets?.Find(target => target != null && target.objectId == objectId);
     }
 
     private void OnDestroy()
