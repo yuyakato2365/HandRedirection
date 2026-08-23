@@ -46,6 +46,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool enableLeftHandRedirectionOriginRotation = true;
     public Color redirectionOriginMarkerColor = new Color(0f, 0.9f, 1f, 0.85f);
 
+    [Header("Runtime Origin Coordinate Axes")]
+    [Tooltip("Show XYZ axes at DeskOrigin and RedirectOrigin while running.")]
+    public bool showOriginCoordinateAxes = true;
+    public float originCoordinateAxisLength = 0.12f;
+    public float originCoordinateAxisLineWidth = 0.006f;
+    public bool originCoordinateAxisShowLabels = true;
+
     [Header("Offset From Anchor To Desk Origin")]
     public Vector3 localPositionOffset = Vector3.zero;
     public Vector3 localEulerOffset = Vector3.zero;
@@ -162,6 +169,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private bool wasLeftRedirectionOriginPinching;
     private bool wasLeftFineRedirectionOriginPinching;
     private GameObject redirectionOriginMarkerInstance;
+    private RuntimeCoordinateAxes deskOriginCoordinateAxes;
+    private RuntimeCoordinateAxes redirectionOriginCoordinateAxes;
     private float nextActivePinchLogTime;
     private float nextLeftWristFailureLogTime;
     private string lastLeftRotationSource = "none";
@@ -232,6 +241,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         UnsubscribeAnchorRefresh();
         SetDeskTransparency(false);
+        SetOriginCoordinateAxesActive(false);
     }
 
     private void LateUpdate()
@@ -252,6 +262,59 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         UpdateHandRotationAlignment();
         UpdateRedirectionOriginPlacement();
         UpdateRedirectionOriginVisual();
+        UpdateOriginCoordinateAxes();
+    }
+
+    public void SetOriginCoordinateAxesVisible(bool visible)
+    {
+        showOriginCoordinateAxes = visible;
+        if (visible)
+            UpdateOriginCoordinateAxes();
+        else
+            SetOriginCoordinateAxesActive(false);
+    }
+
+    private void UpdateOriginCoordinateAxes()
+    {
+        if (!Application.isPlaying || !showOriginCoordinateAxes)
+        {
+            SetOriginCoordinateAxesActive(false);
+            return;
+        }
+
+        UpdateOriginCoordinateAxis(ref deskOriginCoordinateAxes, "DeskOriginAxes", deskOrigin);
+        UpdateOriginCoordinateAxis(ref redirectionOriginCoordinateAxes, "RedirectOriginAxes", redirectionOrigin);
+    }
+
+    private void UpdateOriginCoordinateAxis(ref RuntimeCoordinateAxes axes, string objectName, Transform source)
+    {
+        if (source == null)
+        {
+            if (axes != null)
+                axes.gameObject.SetActive(false);
+            return;
+        }
+
+        if (axes == null)
+        {
+            axes = RuntimeCoordinateAxes.Create(
+                objectName,
+                transform,
+                originCoordinateAxisLength,
+                originCoordinateAxisLineWidth,
+                originCoordinateAxisShowLabels);
+        }
+
+        axes.gameObject.SetActive(true);
+        axes.transform.SetPositionAndRotation(source.position, source.rotation);
+    }
+
+    private void SetOriginCoordinateAxesActive(bool active)
+    {
+        if (deskOriginCoordinateAxes != null)
+            deskOriginCoordinateAxes.gameObject.SetActive(active && deskOrigin != null);
+        if (redirectionOriginCoordinateAxes != null)
+            redirectionOriginCoordinateAxes.gameObject.SetActive(active && redirectionOrigin != null);
     }
 
     [ContextMenu("Anchor Binder/Apply Now")]

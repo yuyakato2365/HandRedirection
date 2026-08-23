@@ -72,6 +72,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     [Tooltip("Line width in metres of automatically generated XYZ axes.")]
     public float defaultAxisLineWidth = 0.006f;
     public bool defaultAxisShowLabels = true;
+    [Tooltip("Show the Spatial Anchor preview and confirmed-anchor XYZ axes at runtime.")]
+    public bool showAnchorCoordinateAxes = true;
 
     [Header("VR Status")]
     public TextMesh statusText;
@@ -1129,12 +1131,22 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         anchorMarkerInstance.transform.localPosition = Vector3.zero;
         anchorMarkerInstance.transform.localRotation = Quaternion.identity;
+        anchorMarkerInstance.SetActive(showAnchorCoordinateAxes);
+    }
+
+    public void SetAnchorCoordinateAxesVisible(bool visible)
+    {
+        showAnchorCoordinateAxes = visible;
+        if (previewObject != null)
+            previewObject.SetActive(visible && (IsPlacementMode || !hidePreviewWhenIdle));
+        if (anchorMarkerInstance != null)
+            anchorMarkerInstance.SetActive(visible);
     }
 
     private void SetPreviewActive(bool active)
     {
         if (previewObject != null)
-            previewObject.SetActive(active || !hidePreviewWhenIdle);
+            previewObject.SetActive(showAnchorCoordinateAxes && (active || !hidePreviewWhenIdle));
     }
 
     private void EnsureDefaultVisuals()

@@ -194,6 +194,8 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
 
         if (TryHandleTrackerOffsetCommand(normalized))
             return;
+        if (TryHandleTrackerAxisCommand(normalized))
+            return;
 
         if (placer == null)
         {
@@ -389,6 +391,48 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                     SendStatus($"GAZE_DEBUG_VISUALS {(gazeDebugToggleController.showHmdGazeDebugVisuals ? "enabled" : "disabled")}");
                 }
                 break;
+            case "ENABLE_ANCHOR_AXES":
+                placer.SetAnchorCoordinateAxesVisible(true);
+                SendStatus("ANCHOR_AXES enabled");
+                break;
+            case "DISABLE_ANCHOR_AXES":
+                placer.SetAnchorCoordinateAxesVisible(false);
+                SendStatus("ANCHOR_AXES disabled");
+                break;
+            case "ENABLE_ORIGIN_AXES":
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder originAxesEnableBinder))
+                {
+                    originAxesEnableBinder.SetOriginCoordinateAxesVisible(true);
+                    SendStatus("ORIGIN_AXES enabled");
+                }
+                break;
+            case "DISABLE_ORIGIN_AXES":
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder originAxesDisableBinder))
+                {
+                    originAxesDisableBinder.SetOriginCoordinateAxesVisible(false);
+                    SendStatus("ORIGIN_AXES disabled");
+                }
+                break;
+            case "ENABLE_TRACKER_AXES":
+                SetTrackerAxesVisible(true);
+                break;
+            case "DISABLE_TRACKER_AXES":
+                SetTrackerAxesVisible(false);
+                break;
+            case "ENABLE_ALL_COORDINATE_AXES":
+                placer.SetAnchorCoordinateAxesVisible(true);
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder allAxesEnableBinder))
+                    allAxesEnableBinder.SetOriginCoordinateAxesVisible(true);
+                SetTrackerAxesVisible(true);
+                SendStatus("ALL_COORDINATE_AXES enabled");
+                break;
+            case "DISABLE_ALL_COORDINATE_AXES":
+                placer.SetAnchorCoordinateAxesVisible(false);
+                if (TryGetDeskBinder(out SpatialAnchorToDeskOriginBinder allAxesDisableBinder))
+                    allAxesDisableBinder.SetOriginCoordinateAxesVisible(false);
+                SetTrackerAxesVisible(false);
+                SendStatus("ALL_COORDINATE_AXES disabled");
+                break;
             case "NEXT_PARTICIPANT":
             case "RESET_FOR_NEXT_PARTICIPANT":
             case "RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT":
@@ -473,6 +517,50 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         GameObject obj = new GameObject("PassthroughScaniverseModeController");
         controller = obj.AddComponent<PassthroughScaniverseModeController>();
         passthroughScaniverseModeController = controller;
+        return true;
+    }
+
+    private void SetTrackerAxesVisible(bool visible)
+    {
+        TrackerToCubeOffsetCalibrator3 calibrator = FindTrackerCalibrator();
+        if (calibrator == null)
+        {
+            SendStatus("ERROR tracker_calibrator_not_found");
+            return;
+        }
+
+        calibrator.SetDetectedPoseAxesVisible(visible);
+        SendStatus($"TRACKER_AXES {(visible ? "enabled" : "disabled")}");
+    }
+
+    private bool TryHandleTrackerAxisCommand(string command)
+    {
+        string[] parts = command.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return false;
+
+        bool visible;
+        if (parts[0] == "ENABLE_TRACKER_AXIS" || parts[0] == "SHOW_TRACKER_AXIS")
+            visible = true;
+        else if (parts[0] == "DISABLE_TRACKER_AXIS" || parts[0] == "HIDE_TRACKER_AXIS")
+            visible = false;
+        else
+            return false;
+
+        if (parts.Length != 2 || !uint.TryParse(parts[1], out uint objectId))
+        {
+            SendStatus("ERROR tracker_axis_format");
+            return true;
+        }
+
+        TrackerToCubeOffsetCalibrator3 calibrator = FindTrackerCalibrator();
+        if (calibrator == null || !calibrator.SetDetectedPoseAxisVisible(objectId, visible))
+        {
+            SendStatus($"ERROR tracker_axis_target_not_found {objectId}");
+            return true;
+        }
+
+        SendStatus($"TRACKER_AXIS {objectId} {(visible ? "enabled" : "disabled")}");
         return true;
     }
 

@@ -143,6 +143,29 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     public float detectedPoseAxisLineWidth = 0.006f;
     public bool detectedPoseAxisShowLabels = true;
 
+    public void SetDetectedPoseAxesVisible(bool visible)
+    {
+        showDetectedPoseAxes = visible;
+        if (visible)
+            hiddenDetectedPoseAxisIds.Clear();
+        SetDetectedPoseAxesActive(visible);
+    }
+
+    public bool SetDetectedPoseAxisVisible(uint objectId, bool visible)
+    {
+        if (FindTarget(objectId) == null)
+            return false;
+
+        if (visible)
+            hiddenDetectedPoseAxisIds.Remove(objectId);
+        else
+            hiddenDetectedPoseAxisIds.Add(objectId);
+
+        if (detectedPoseAxes.TryGetValue(objectId, out RuntimeCoordinateAxes axes) && axes != null)
+            axes.gameObject.SetActive(visible && showDetectedPoseAxes);
+        return true;
+    }
+
     private UdpClient udp;
     private Thread recvThread;
     private volatile bool running;
@@ -153,6 +176,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     private bool hasLatestDeskPose;
     private DeskPose latestDeskPose;
     private readonly Dictionary<uint, RuntimeCoordinateAxes> detectedPoseAxes = new Dictionary<uint, RuntimeCoordinateAxes>();
+    private readonly HashSet<uint> hiddenDetectedPoseAxisIds = new HashSet<uint>();
 
     private void Start()
     {
@@ -396,11 +420,15 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             if (!TryResolveObjectPoseInDeskOrigin(rel, hasDeskPose, deskPose, out Vector3 relPosInDeskOrigin, out Quaternion relRotInDeskOrigin))
                 continue;
 
-            if (showDetectedPoseAxes)
+            if (showDetectedPoseAxes && !hiddenDetectedPoseAxisIds.Contains(target.objectId))
             {
                 Vector3 detectedPosW = deskPosW + (deskRotW * relPosInDeskOrigin);
                 Quaternion detectedRotW = deskRotW * relRotInDeskOrigin;
                 UpdateDetectedPoseAxis(target.objectId, detectedPosW, detectedRotW);
+            }
+            else if (detectedPoseAxes.TryGetValue(target.objectId, out RuntimeCoordinateAxes hiddenAxes) && hiddenAxes != null)
+            {
+                hiddenAxes.gameObject.SetActive(false);
             }
 
             Quaternion centerRotOffset = Quaternion.Euler(target.centerEulerOffset);
