@@ -137,6 +137,11 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     public bool logBadPackets = false;
     public bool logReceivedIds = false;
     public bool logDeskPackets = false;
+    [Tooltip("Show red-X, green-Y, blue-Z axes at each raw detected tracker pose, before object-center and DeskOrigin-local offsets are applied.")]
+    public bool showDetectedPoseAxes = true;
+    public float detectedPoseAxisLength = 0.12f;
+    public float detectedPoseAxisLineWidth = 0.006f;
+    public bool detectedPoseAxisShowLabels = true;
 
     private UdpClient udp;
     private Thread recvThread;
@@ -147,6 +152,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     private readonly HashSet<uint> loggedIds = new HashSet<uint>();
     private bool hasLatestDeskPose;
     private DeskPose latestDeskPose;
+    private readonly Dictionary<uint, RuntimeCoordinateAxes> detectedPoseAxes = new Dictionary<uint, RuntimeCoordinateAxes>();
 
     private void Start()
     {
@@ -292,12 +298,24 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
         catch { }
 
         recvThread = null;
+        DestroyDetectedPoseAxes();
+    }
+
+    private void OnDisable()
+    {
+        SetDetectedPoseAxesActive(false);
     }
 
     private void Update()
     {
         if (deskTransform == null)
+        {
+            SetDetectedPoseAxesActive(false);
             return;
+        }
+
+        if (!showDetectedPoseAxes)
+            SetDetectedPoseAxesActive(false);
 
         if (updateDeskTransformFromPackets && hmdTransform != null)
             UpdateDeskTransform();
@@ -378,6 +396,13 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             if (!TryResolveObjectPoseInDeskOrigin(rel, hasDeskPose, deskPose, out Vector3 relPosInDeskOrigin, out Quaternion relRotInDeskOrigin))
                 continue;
 
+            if (showDetectedPoseAxes)
+            {
+                Vector3 detectedPosW = deskPosW + (deskRotW * relPosInDeskOrigin);
+                Quaternion detectedRotW = deskRotW * relRotInDeskOrigin;
+                UpdateDetectedPoseAxis(target.objectId, detectedPosW, detectedRotW);
+            }
+
             Quaternion centerRotOffset = Quaternion.Euler(target.centerEulerOffset);
             Vector3 centerInDeskPos = relPosInDeskOrigin + (relRotInDeskOrigin * target.centerOffsetInTracker);
             Quaternion centerInDeskRot = relRotInDeskOrigin * centerRotOffset;
@@ -387,6 +412,42 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
 
             ApplyPose(target.objTransform, targetPosW, targetRotW, positionLerp, rotationSlerp);
         }
+    }
+
+    private void UpdateDetectedPoseAxis(uint objectId, Vector3 worldPosition, Quaternion worldRotation)
+    {
+        if (!detectedPoseAxes.TryGetValue(objectId, out RuntimeCoordinateAxes axes) || axes == null)
+        {
+            axes = RuntimeCoordinateAxes.Create(
+                $"DetectedTrackerPoseAxes_{objectId}",
+                transform,
+                detectedPoseAxisLength,
+                detectedPoseAxisLineWidth,
+                detectedPoseAxisShowLabels);
+            detectedPoseAxes[objectId] = axes;
+        }
+
+        axes.gameObject.SetActive(true);
+        axes.transform.SetPositionAndRotation(worldPosition, worldRotation);
+    }
+
+    private void SetDetectedPoseAxesActive(bool active)
+    {
+        foreach (RuntimeCoordinateAxes axes in detectedPoseAxes.Values)
+        {
+            if (axes != null && axes.gameObject.activeSelf != active)
+                axes.gameObject.SetActive(active);
+        }
+    }
+
+    private void DestroyDetectedPoseAxes()
+    {
+        foreach (RuntimeCoordinateAxes axes in detectedPoseAxes.Values)
+        {
+            if (axes != null)
+                Destroy(axes.gameObject);
+        }
+        detectedPoseAxes.Clear();
     }
 
     private bool TryResolveObjectPoseInDeskOrigin(

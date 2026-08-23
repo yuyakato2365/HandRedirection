@@ -67,6 +67,11 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public GameObject anchorMarkerPrefab;
     public bool hidePreviewWhenIdle = true;
     public bool createDefaultVisuals = true;
+    [Tooltip("Length in metres of each automatically generated XYZ axis.")]
+    public float defaultAxisLength = 0.12f;
+    [Tooltip("Line width in metres of automatically generated XYZ axes.")]
+    public float defaultAxisLineWidth = 0.006f;
+    public bool defaultAxisShowLabels = true;
 
     [Header("VR Status")]
     public TextMesh statusText;
@@ -451,7 +456,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             currentOvrSpatialAnchor = ovrAnchor;
             LastAnchorWasLoadedSavedAnchor = true;
 
-            CreateMarkerUnder(currentOvrSpatialAnchor.transform, "LoadedPersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
+            CreateMarkerUnder(currentOvrSpatialAnchor.transform, "LoadedPersistentDeskAnchorMarker");
             ReportSavedAnchorLoadStatus("Saved Spatial Anchor localized\nWaiting for stable pose...", visibleStatus);
             await WaitForLoadedAnchorPoseStableAsync(currentOvrSpatialAnchor.transform);
             ReportSavedAnchorLoadStatus(notifyDeskOrigin ? "Saved Spatial Anchor loaded" : "Saved Spatial Anchor refreshed", visibleStatus);
@@ -933,7 +938,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (CurrentAnchor == null)
             return;
 
-        CreateMarkerUnder(CurrentAnchor.transform, "SpatialAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
+        CreateMarkerUnder(CurrentAnchor.transform, "SpatialAnchorMarker");
     }
 
     private async System.Threading.Tasks.Task CreateAndSaveOvrSpatialAnchorAsync()
@@ -987,7 +992,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         PlayerPrefs.SetString(savedAnchorPlayerPrefsKey, currentOvrSpatialAnchor.Uuid.ToString());
         PlayerPrefs.Save();
 
-        CreateMarkerUnder(currentOvrSpatialAnchor.transform, "PersistentDeskAnchorMarker", new Color(0.1f, 1f, 0.25f, 1f));
+        CreateMarkerUnder(currentOvrSpatialAnchor.transform, "PersistentDeskAnchorMarker");
         SetStatusMessage("Persistent Spatial Anchor saved");
         AnchorTransformCreated?.Invoke(currentOvrSpatialAnchor.transform);
     }
@@ -1066,7 +1071,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         sessionAnchorTransform = sessionAnchor.transform;
         LastAnchorWasLoadedSavedAnchor = false;
 
-        CreateMarkerUnder(sessionAnchorTransform, "PCVRSessionAnchorMarker", new Color(0.1f, 0.75f, 1f, 1f));
+        CreateMarkerUnder(sessionAnchorTransform, "PCVRSessionAnchorMarker");
         SetStatusMessage($"PCVR session anchor created\n{reason}");
         AnchorTransformCreated?.Invoke(sessionAnchorTransform);
     }
@@ -1101,23 +1106,25 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         LastAnchorWasLoadedSavedAnchor = false;
     }
 
-    private void CreateMarkerUnder(Transform parent, string markerName, Color fallbackColor)
+    private void CreateMarkerUnder(Transform parent, string markerName)
     {
         if (anchorMarkerInstance != null)
             Destroy(anchorMarkerInstance);
 
         anchorMarkerInstance = anchorMarkerPrefab != null
             ? Instantiate(anchorMarkerPrefab, parent)
-            : GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            : RuntimeCoordinateAxes.Create(
+                markerName,
+                parent,
+                defaultAxisLength,
+                defaultAxisLineWidth,
+                defaultAxisShowLabels).gameObject;
 
         anchorMarkerInstance.name = markerName;
 
         if (anchorMarkerPrefab == null)
         {
             anchorMarkerInstance.transform.SetParent(parent, false);
-            anchorMarkerInstance.transform.localScale = Vector3.one * 0.03f;
-            RemoveCollider(anchorMarkerInstance);
-            SetPrimitiveColor(anchorMarkerInstance, fallbackColor);
         }
 
         anchorMarkerInstance.transform.localPosition = Vector3.zero;
@@ -1137,11 +1144,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         if (previewObject == null)
         {
-            previewObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            previewObject.name = "SpatialAnchorPreview";
-            previewObject.transform.localScale = Vector3.one * 0.04f;
-            RemoveCollider(previewObject);
-            SetPrimitiveColor(previewObject, new Color(1f, 0.85f, 0.05f, 0.75f));
+            previewObject = RuntimeCoordinateAxes.Create(
+                "SpatialAnchorPreviewAxes",
+                null,
+                defaultAxisLength,
+                defaultAxisLineWidth,
+                defaultAxisShowLabels).gameObject;
         }
     }
 
@@ -1174,24 +1182,6 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             cam.up * statusTextCameraOffset.y +
             cam.forward * statusTextCameraOffset.z;
         statusText.transform.rotation = Quaternion.LookRotation(statusText.transform.position - cam.position, cam.up);
-    }
-
-    private static void SetPrimitiveColor(GameObject target, Color color)
-    {
-        Renderer renderer = target.GetComponent<Renderer>();
-        if (renderer == null)
-            return;
-
-        Material material = new Material(Shader.Find("Standard"));
-        material.color = color;
-        renderer.sharedMaterial = material;
-    }
-
-    private static void RemoveCollider(GameObject target)
-    {
-        Collider collider = target.GetComponent<Collider>();
-        if (collider != null)
-            Destroy(collider);
     }
 
     private void ClearSessionAnchor()

@@ -47,6 +47,9 @@ public static class SpatialAnchorSetupMenu
         placer.enableOvrHandPinchInput = true;
         placer.autoFindConfirmHand = true;
         placer.createDefaultVisuals = true;
+        placer.defaultAxisLength = 0.12f;
+        placer.defaultAxisLineWidth = 0.006f;
+        placer.defaultAxisShowLabels = true;
         placer.createDefaultStatusText = true;
         placer.loadSavedAnchorOnStart = false;
         placer.reloadSavedAnchorOnHmdMounted = true;
@@ -90,6 +93,14 @@ public static class SpatialAnchorSetupMenu
             toggle.handRedirectionBehaviours = new MonoBehaviour[] { goGo };
 
         TrackerToCubeOffsetCalibrator3 trackerCalibrator = Object.FindFirstObjectByType<TrackerToCubeOffsetCalibrator3>();
+        if (trackerCalibrator != null)
+        {
+            Undo.RecordObject(trackerCalibrator, "Configure Tracker Pose Debug Axes");
+            trackerCalibrator.showDetectedPoseAxes = true;
+            trackerCalibrator.detectedPoseAxisLength = 0.12f;
+            trackerCalibrator.detectedPoseAxisLineWidth = 0.006f;
+            trackerCalibrator.detectedPoseAxisShowLabels = true;
+        }
         if (trackerCalibrator != null && (toggle.originalModeBehaviours == null || toggle.originalModeBehaviours.Length == 0))
             toggle.originalModeBehaviours = new MonoBehaviour[] { trackerCalibrator };
 
