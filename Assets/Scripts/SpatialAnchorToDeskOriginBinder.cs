@@ -119,6 +119,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public float activePinchLogIntervalSec = 1f;
     public bool logAnchorDeskDiagnostics = false;
 
+    [Header("Scene View Visualization")]
+    [Tooltip("Show DeskOrigin, RedirectOrigin, and the derived Spatial Anchor pose in the Scene view while not playing.")]
+    public bool showReferenceAxesInEditMode = true;
+    public bool showDerivedSpatialAnchorInEditMode = true;
+    [Min(0.02f)] public float editModeAxisLength = 0.18f;
+    [Min(1f)] public float editModeAxisLineWidth = 3f;
+
     public bool HasAlignmentState { get; private set; }
     public bool IsAlignmentConfirmed { get; private set; }
     public bool IsAdjustingAlignment => HasAlignmentState && !IsAlignmentConfirmed;
