@@ -123,6 +123,23 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
         slider.deformScaniverseWidthBand = true;
         slider.deformScaniverseDepthBand = true;
 
+        SpatialAnchorToDeskOriginBinder binder = FindSceneObject<SpatialAnchorToDeskOriginBinder>();
+        DeskVisualFollower roomFollower = FindRoomPoseFollower(room3Dgs);
+        if (binder != null && binder.deskOrigin != null)
+        {
+            if (roomFollower == null)
+                roomFollower = Undo.AddComponent<DeskVisualFollower>(room3Dgs.gameObject);
+
+            Undo.RecordObject(roomFollower, "Configure 3DGS DeskOrigin Pose Link");
+            roomFollower.deskOrigin = binder.deskOrigin;
+            roomFollower.moveDeskOriginWithVisualInEditMode = true;
+            roomFollower.followInEditMode = false;
+            roomFollower.followInPlayMode = true;
+            roomFollower.recaptureOffsetOnPlayStart = true;
+            roomFollower.CaptureCurrentTransformAsOffset();
+            EditorUtility.SetDirty(roomFollower);
+        }
+
         EditorUtility.SetDirty(guard);
         EditorUtility.SetDirty(slider);
         EditorUtility.SetDirty(room3Dgs.gameObject);
@@ -138,6 +155,8 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
         var issues = new System.Collections.Generic.List<string>();
         PassthroughRuntimeGuard guard = FindSceneObject<PassthroughRuntimeGuard>();
         DeskScaleSliderPanel slider = FindSceneObject<DeskScaleSliderPanel>();
+        SpatialAnchorToDeskOriginBinder binder = FindSceneObject<SpatialAnchorToDeskOriginBinder>();
+        DeskVisualFollower roomFollower = FindRoomPoseFollower(room3Dgs);
 
         if (room3Dgs == null)
             issues.Add("Room 3DGS is not assigned.");
@@ -147,6 +166,10 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
             issues.Add("PassthroughRuntimeGuard is missing.");
         if (slider == null)
             issues.Add("DeskScaleSliderPanel is missing.");
+        if (binder == null || binder.deskOrigin == null)
+            issues.Add("SpatialAnchorToDeskOriginBinder or its DeskOrigin reference is missing.");
+        if (room3Dgs != null && roomFollower == null)
+            issues.Add("The selected Room 3DGS has no DeskVisualFollower pose link.");
 
         if (room3Dgs != null)
         {
@@ -177,7 +200,13 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
             && slider.scaniverseDeformationRoots[0] == room3Dgs
             && slider.deformScaniverseRoomWithDeskScale
             && slider.deformScaniverseWidthBand
-            && slider.deformScaniverseDepthBand;
+            && slider.deformScaniverseDepthBand
+            && binder != null
+            && binder.deskOrigin != null
+            && roomFollower != null
+            && roomFollower.deskOrigin == binder.deskOrigin
+            && roomFollower.moveDeskOriginWithVisualInEditMode
+            && roomFollower.followInPlayMode;
 
         validationMessage = referencesApplied
             ? $"Ready. Room='{room3Dgs.name}', Desk='{desk.name}'. References are assigned and the room's desk-width/depth bands will deform with the desk. Renaming either object is safe. Save the scene."
@@ -196,6 +225,20 @@ public sealed class HandRedirectionEnvironmentSetupWindow : EditorWindow
                     return component.gameObject.scene == SceneManager.GetActiveScene();
                 return true;
             });
+    }
+
+    private static DeskVisualFollower FindRoomPoseFollower(Transform room)
+    {
+        Transform current = room;
+        while (current != null)
+        {
+            DeskVisualFollower follower = current.GetComponent<DeskVisualFollower>();
+            if (follower != null)
+                return follower;
+            current = current.parent;
+        }
+
+        return room != null ? room.GetComponentInChildren<DeskVisualFollower>(true) : null;
     }
 
     private static Transform FirstNonNull(Transform[] transforms)
