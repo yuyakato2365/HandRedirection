@@ -74,8 +74,6 @@ namespace GaussianSplatting.Runtime
 
         GSRenderPass m_Pass;
         bool m_HasCamera;
-        float m_NextFeatureDiagnosticTime;
-        bool m_LogCurrentCameraPass;
 
         public override void Create()
         {
@@ -88,52 +86,19 @@ namespace GaussianSplatting.Runtime
         public override void OnCameraPreCull(ScriptableRenderer renderer, in CameraData cameraData)
         {
             m_HasCamera = false;
-            bool shouldLog = Time.realtimeSinceStartup >= m_NextFeatureDiagnosticTime;
-            if (shouldLog)
-                m_NextFeatureDiagnosticTime = Time.realtimeSinceStartup + 1f;
-            m_LogCurrentCameraPass = shouldLog;
 
             var system = GaussianSplatRenderSystem.instance;
             if (!system.GatherSplatsForCamera(cameraData.camera))
-            {
-                if (shouldLog)
-                {
-                    Debug.LogWarning(
-                        $"[GaussianSplatDiagnostics] URP OnCameraPreCull no splats camera={cameraData.camera.name} " +
-                        $"cameraType={cameraData.camera.cameraType} renderer={renderer?.GetType().Name ?? "<null>"} " +
-                        $"renderType={cameraData.renderType} target={cameraData.camera.targetTexture?.name ?? "<backbuffer>"}");
-                }
                 return;
-            }
 
             m_HasCamera = true;
-            if (shouldLog)
-            {
-                Debug.Log(
-                    $"[GaussianSplatDiagnostics] URP OnCameraPreCull found splats camera={cameraData.camera.name} " +
-                    $"cameraType={cameraData.camera.cameraType} renderer={renderer?.GetType().Name ?? "<null>"} " +
-                    $"renderType={cameraData.renderType} target={cameraData.camera.targetTexture?.name ?? "<backbuffer>"}");
-            }
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             if (!m_HasCamera)
-            {
-                if (m_LogCurrentCameraPass)
-                {
-                    Debug.LogWarning(
-                        $"[GaussianSplatDiagnostics] URP AddRenderPasses skipped camera={renderingData.cameraData.camera.name} " +
-                        $"cameraType={renderingData.cameraData.camera.cameraType} renderer={renderer?.GetType().Name ?? "<null>"}");
-                }
                 return;
-            }
-            if (m_LogCurrentCameraPass)
-            {
-                Debug.Log(
-                    $"[GaussianSplatDiagnostics] URP AddRenderPasses enqueue camera={renderingData.cameraData.camera.name} " +
-                    $"cameraType={renderingData.cameraData.camera.cameraType} renderer={renderer?.GetType().Name ?? "<null>"}");
-            }
+
             renderer.EnqueuePass(m_Pass);
         }
 

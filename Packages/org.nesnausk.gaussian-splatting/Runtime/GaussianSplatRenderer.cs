@@ -2,7 +2,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Text;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
@@ -31,7 +30,6 @@ namespace GaussianSplatting.Runtime
         readonly List<(GaussianSplatRenderer, MaterialPropertyBlock)> m_ActiveSplats = new();
 
         CommandBuffer m_CommandBuffer;
-        float m_NextGatherDiagnosticTime;
 
         public void RegisterSplat(GaussianSplatRenderer r)
         {
@@ -74,57 +72,22 @@ namespace GaussianSplatting.Runtime
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
         public bool GatherSplatsForCamera(Camera cam)
         {
-            bool shouldLog = Time.realtimeSinceStartup >= m_NextGatherDiagnosticTime;
-            if (shouldLog)
-                m_NextGatherDiagnosticTime = Time.realtimeSinceStartup + 1f;
-
             if (cam.cameraType == CameraType.Preview)
-            {
-                if (shouldLog)
-                    Debug.Log($"[GaussianSplatDiagnostics] Gather skipped preview camera={cam.name}");
                 return false;
-            }
+
             // gather all active & valid splat objects
             m_ActiveSplats.Clear();
-            int rejectedSplats = 0;
-            StringBuilder details = shouldLog ? new StringBuilder(1024) : null;
             foreach (var kvp in m_Splats)
             {
                 var gs = kvp.Key;
                 if (gs == null || !gs.isActiveAndEnabled || !gs.HasValidAsset || !gs.HasValidRenderSetup)
-                {
-                    rejectedSplats++;
-                    if (shouldLog)
-                        details.AppendLine(gs == null ? "  - <null GaussianSplatRenderer>" : gs.GetDiagnosticState(cam));
                     continue;
-                }
+
                 m_ActiveSplats.Add((kvp.Key, kvp.Value));
-                if (shouldLog)
-                    details.AppendLine(gs.GetDiagnosticState(cam));
-            }
-            if (m_ActiveSplats.Count == 0)
-            {
-                if (shouldLog)
-                {
-                    Debug.LogWarning(
-                        $"[GaussianSplatDiagnostics] GatherSplatsForCamera=false camera={cam.name} type={cam.cameraType} " +
-                        $"enabled={cam.enabled} active={cam.gameObject.activeInHierarchy} pixel={cam.pixelWidth}x{cam.pixelHeight} " +
-                        $"cullingMask=0x{cam.cullingMask:X8} currentRP={GraphicsSettings.currentRenderPipeline?.name ?? "<null>"} " +
-                        $"qualityRP={QualitySettings.renderPipeline?.name ?? "<null>"} registered={m_Splats.Count} " +
-                        $"accepted=0 rejected={rejectedSplats}\n{details}");
-                }
-                return false;
             }
 
-            if (shouldLog)
-            {
-                Debug.Log(
-                    $"[GaussianSplatDiagnostics] GatherSplatsForCamera=true camera={cam.name} type={cam.cameraType} " +
-                    $"enabled={cam.enabled} active={cam.gameObject.activeInHierarchy} pixel={cam.pixelWidth}x{cam.pixelHeight} " +
-                    $"cullingMask=0x{cam.cullingMask:X8} currentRP={GraphicsSettings.currentRenderPipeline?.name ?? "<null>"} " +
-                    $"qualityRP={QualitySettings.renderPipeline?.name ?? "<null>"} registered={m_Splats.Count} " +
-                    $"accepted={m_ActiveSplats.Count} rejected={rejectedSplats}\n{details}");
-            }
+            if (m_ActiveSplats.Count == 0)
+                return false;
 
             // sort them by order and depth from camera
             var camTr = cam.transform;
@@ -538,7 +501,6 @@ namespace GaussianSplatting.Runtime
             EnsureSorterAndRegister();
 
             CreateResourcesForAsset();
-            Debug.Log($"[GaussianSplatDiagnostics] OnEnable completed {GetDiagnosticState(Camera.main)}");
         }
 
         void SetAssetDataOnCS(CommandBuffer cmb, KernelIndices kernel)
