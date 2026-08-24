@@ -96,6 +96,11 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public bool preferLiveHandPoseForPlacement = true;
     public OvrHandPlacementJoint placementHandJoint = OvrHandPlacementJoint.PointerPose;
     public Vector3 handPlacementLocalOffset = Vector3.zero;
+    [Tooltip("Place the anchor directly below the tracked right-hand root, ignoring PointerPose and the legacy placement offsets.")]
+    public bool placeDirectlyBelowHandRoot = true;
+    [Min(0f)]
+    [Tooltip("World-space distance below the tracked right-hand root used by direct hand placement.")]
+    public float directHandVerticalOffsetMeters = 0.05f;
     [Tooltip("World-space offset applied to the final anchor placement pose. Use negative Y to place the anchor below the hand marker.")]
     public Vector3 anchorPlacementWorldOffset = new Vector3(0f, -0.08f, 0f);
 
@@ -781,7 +786,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (TryGetLiveHandPlacementPose(out Pose handPose))
         {
             pose = handPose;
-            ApplyCandidateWorldOffset(ref pose);
+            if (!placeDirectlyBelowHandRoot)
+                ApplyCandidateWorldOffset(ref pose);
             return true;
         }
 
@@ -856,6 +862,14 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         Transform handTransform = confirmHand.transform;
         Vector3 position = handTransform.position;
         Quaternion rotation = handTransform.rotation;
+
+        if (placeDirectlyBelowHandRoot)
+        {
+            position += Vector3.down * Mathf.Max(0f, directHandVerticalOffsetMeters);
+            Vector3 handForward = rotation * Vector3.forward;
+            pose = new Pose(position, MakeRotation(handForward, Vector3.up));
+            return true;
+        }
 
         if (placementHandJoint == OvrHandPlacementJoint.PointerPose && TryGetPointerPose(out Pose pointerPose))
         {

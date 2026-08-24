@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using GaussianSplatting.Runtime;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -119,6 +120,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [Range(0.05f, 1f)] public float adjustingDeskAlpha = 0.35f;
     [Tooltip("Optional root for the desk visuals to fade. If unset, a DeskVisualFollower using deskOrigin is preferred, then deskOrigin itself.")]
     public Transform transparentDeskRoot;
+    [Tooltip("Reduce Gaussian Splat opacity while the Spatial Anchor / DeskOrigin pose is being configured.")]
+    public bool fadeGaussianSplatsWhileAdjusting = true;
+    [Range(0.05f, 1f)] public float adjustingGaussianSplatOpacityMultiplier = 0.35f;
 
     [Header("Debug")]
     public bool logHandAlignmentDebug = false;
@@ -183,6 +187,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private readonly Queue<AnchorPoseSample> anchorPoseSamples = new Queue<AnchorPoseSample>();
     private bool usingPlacementCandidateAnchor;
     private readonly List<MaterialAlphaState> transparentMaterialStates = new List<MaterialAlphaState>();
+    private readonly List<GaussianSplatOpacityState> gaussianSplatOpacityStates = new List<GaussianSplatOpacityState>();
     private bool deskTransparencyApplied;
 
     private struct AnchorPoseSample
@@ -210,6 +215,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         public bool hasZWrite;
         public float zWrite;
         public int renderQueue;
+    }
+
+    private struct GaussianSplatOpacityState
+    {
+        public GaussianSplatRenderer renderer;
+        public float opacityScale;
     }
 
     private void Awake()
@@ -1667,7 +1678,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void SetDeskTransparency(bool transparent)
     {
-        if (!makeDeskTransparentWhileAdjusting)
+        if (!makeDeskTransparentWhileAdjusting && !fadeGaussianSplatsWhileAdjusting)
         {
             if (!transparent)
                 RestoreDeskTransparency();
@@ -1687,8 +1698,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         if (previewDeskDuringAnchorPlacement && anchorPlacer != null && anchorPlacer.IsPlacementMode)
         {
-            bool shouldBeTransparent = !anchorPlacer.IsCandidatePoseLocked || anchorPlacer.IsCandidatePoseBeingAdjusted;
-            SetDeskTransparency(shouldBeTransparent);
+            SetDeskTransparency(true);
             return;
         }
 
@@ -1704,42 +1714,70 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (root == null)
             return;
 
-        Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
-        if (renderers == null || renderers.Length == 0)
-            return;
-
-        transparentMaterialStates.Clear();
-        float alpha = Mathf.Clamp01(adjustingDeskAlpha);
-        for (int i = 0; i < renderers.Length; i++)
+        gaussianSplatOpacityStates.Clear();
+        if (fadeGaussianSplatsWhileAdjusting)
         {
-            Renderer renderer = renderers[i];
-            if (renderer == null || IsScaniverseRenderer(renderer))
-                continue;
-
-            Material[] materials = renderer.sharedMaterials;
-            for (int m = 0; m < materials.Length; m++)
+            GaussianSplatRenderer[] splatRenderers = root.GetComponentsInChildren<GaussianSplatRenderer>(true);
+            float opacityMultiplier = Mathf.Clamp01(adjustingGaussianSplatOpacityMultiplier);
+            for (int i = 0; i < splatRenderers.Length; i++)
             {
-                Material material = materials[m];
-                if (material == null || ContainsMaterialState(material))
+                GaussianSplatRenderer splatRenderer = splatRenderers[i];
+                if (splatRenderer == null)
                     continue;
 
-                MaterialAlphaState state = CaptureMaterialState(material);
-                transparentMaterialStates.Add(state);
-                ForceMaterialTransparent(material, alpha);
+                gaussianSplatOpacityStates.Add(new GaussianSplatOpacityState
+                {
+                    renderer = splatRenderer,
+                    opacityScale = splatRenderer.m_OpacityScale
+                });
+                splatRenderer.m_OpacityScale *= opacityMultiplier;
             }
         }
 
-        deskTransparencyApplied = transparentMaterialStates.Count > 0;
+        transparentMaterialStates.Clear();
+        if (makeDeskTransparentWhileAdjusting)
+        {
+            Renderer[] renderers = root.GetComponentsInChildren<Renderer>(true);
+            float alpha = Mathf.Clamp01(adjustingDeskAlpha);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null || IsScaniverseRenderer(renderer))
+                    continue;
+
+                Material[] materials = renderer.sharedMaterials;
+                for (int m = 0; m < materials.Length; m++)
+                {
+                    Material material = materials[m];
+                    if (material == null || ContainsMaterialState(material))
+                        continue;
+
+                    MaterialAlphaState state = CaptureMaterialState(material);
+                    transparentMaterialStates.Add(state);
+                    ForceMaterialTransparent(material, alpha);
+                }
+            }
+        }
+
+        deskTransparencyApplied = transparentMaterialStates.Count > 0 || gaussianSplatOpacityStates.Count > 0;
     }
 
     private void RestoreDeskTransparency()
     {
-        if (!deskTransparencyApplied && transparentMaterialStates.Count == 0)
+        if (!deskTransparencyApplied && transparentMaterialStates.Count == 0 && gaussianSplatOpacityStates.Count == 0)
             return;
+
+        for (int i = 0; i < gaussianSplatOpacityStates.Count; i++)
+        {
+            GaussianSplatOpacityState state = gaussianSplatOpacityStates[i];
+            if (state.renderer != null)
+                state.renderer.m_OpacityScale = state.opacityScale;
+        }
 
         for (int i = 0; i < transparentMaterialStates.Count; i++)
             RestoreMaterialState(transparentMaterialStates[i]);
 
+        gaussianSplatOpacityStates.Clear();
         transparentMaterialStates.Clear();
         deskTransparencyApplied = false;
     }
