@@ -101,6 +101,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     [Min(0f)]
     [Tooltip("World-space distance below the tracked right-hand root used by direct hand placement.")]
     public float directHandVerticalOffsetMeters = 0.05f;
+    [Tooltip("Keep the candidate and DeskOrigin following the right hand even after the first pinch locks the pose. Placement still confirms with the configured confirmation action.")]
+    public bool keepFollowingRightHandUntilConfirmed = true;
     [Tooltip("World-space offset applied to the final anchor placement pose. Use negative Y to place the anchor below the hand marker.")]
     public Vector3 anchorPlacementWorldOffset = new Vector3(0f, -0.08f, 0f);
 
@@ -647,6 +649,9 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     private bool ShouldUpdateCandidatePoseFromSource()
     {
+        if (placeDirectlyBelowHandRoot && keepFollowingRightHandUntilConfirmed)
+            return true;
+
         return !candidatePoseLocked || adjustingLockedPoseWithHold;
     }
 
@@ -755,6 +760,16 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     private void UpdateCandidatePose()
     {
+        if (placeDirectlyBelowHandRoot && keepFollowingRightHandUntilConfirmed)
+        {
+            if (TryComputeCandidatePoseFromSource(out Pose directHandPose))
+            {
+                candidatePose = directHandPose;
+                PublishCandidatePose();
+            }
+            return;
+        }
+
         if (candidatePoseLocked && adjustingLockedPoseWithHold)
         {
             if (hasRelativeAdjustStartPose && TryComputeCandidatePoseFromSource(out Pose currentHandCandidatePose))
@@ -859,17 +874,29 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (confirmHand == null || !confirmHand.IsTracked)
             return false;
 
+        if (placeDirectlyBelowHandRoot)
+        {
+            // OVRHand can live on a stationary parent. Prefer the tracked
+            // wrist/root bone, then the tracked pointer pose, and use the
+            // component transform only as a last-resort compatibility path.
+            Pose trackedRootPose;
+            if (!TryGetSkeletonBonePose(OVRSkeleton.BoneId.Hand_WristRoot, out trackedRootPose) &&
+                !TryGetPointerPose(out trackedRootPose))
+            {
+                trackedRootPose = new Pose(confirmHand.transform.position, confirmHand.transform.rotation);
+            }
+
+            Vector3 trackedRootPosition = trackedRootPose.position;
+            Quaternion trackedRootRotation = trackedRootPose.rotation;
+            trackedRootPosition += Vector3.down * Mathf.Max(0f, directHandVerticalOffsetMeters);
+            Vector3 handForward = trackedRootRotation * Vector3.forward;
+            pose = new Pose(trackedRootPosition, MakeRotation(handForward, Vector3.up));
+            return true;
+        }
+
         Transform handTransform = confirmHand.transform;
         Vector3 position = handTransform.position;
         Quaternion rotation = handTransform.rotation;
-
-        if (placeDirectlyBelowHandRoot)
-        {
-            position += Vector3.down * Mathf.Max(0f, directHandVerticalOffsetMeters);
-            Vector3 handForward = rotation * Vector3.forward;
-            pose = new Pose(position, MakeRotation(handForward, Vector3.up));
-            return true;
-        }
 
         if (placementHandJoint == OvrHandPlacementJoint.PointerPose && TryGetPointerPose(out Pose pointerPose))
         {

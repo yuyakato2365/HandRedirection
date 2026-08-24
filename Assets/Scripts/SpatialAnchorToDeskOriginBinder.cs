@@ -339,9 +339,18 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
         }
 
-        Vector3 targetPos = anchorPosition + (anchorRotation * localPositionOffset);
+        // During live placement the candidate already represents DeskOrigin's
+        // requested world position (directly below the right hand). Do not add
+        // a previously saved Anchor -> DeskOrigin offset to that preview.
+        bool usingLivePlacementPose = previewDeskDuringAnchorPlacement &&
+                                      anchorPlacer != null &&
+                                      anchorPlacer.IsPlacementMode;
+        Vector3 targetPos = usingLivePlacementPose
+            ? anchorPosition
+            : anchorPosition + (anchorRotation * localPositionOffset);
         Quaternion targetRot = ResolveTargetRotation(anchorRotation);
-        if (TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
+        if (!usingLivePlacementPose &&
+            TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
         {
             targetPos = latchedPosition + (latchedRotation * localPositionOffset);
             targetRot = ResolveTargetRotation(latchedRotation);
