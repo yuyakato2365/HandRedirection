@@ -44,7 +44,7 @@ public static class SpatialAnchorSetupMenu
         placer.preferLiveHandPoseForPlacement = true;
         placer.placeDirectlyBelowHandRoot = true;
         placer.directHandVerticalOffsetMeters = 0.05f;
-        placer.keepFollowingRightHandUntilConfirmed = true;
+        placer.keepFollowingRightHandUntilConfirmed = false;
         placer.placementHandJoint = ManualSpatialAnchorPlacer.OvrHandPlacementJoint.PointerPose;
         placer.enableOvrControllerInput = false;
         placer.enableOvrHandPinchInput = true;

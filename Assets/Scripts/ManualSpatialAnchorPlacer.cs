@@ -101,8 +101,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     [Min(0f)]
     [Tooltip("World-space distance below the tracked right-hand root used by direct hand placement.")]
     public float directHandVerticalOffsetMeters = 0.05f;
-    [Tooltip("Keep the candidate and DeskOrigin following the right hand even after the first pinch locks the pose. Placement still confirms with the configured confirmation action.")]
-    public bool keepFollowingRightHandUntilConfirmed = true;
+    [Tooltip("Keep following the right hand after the first pinch. Leave disabled for the normal workflow: follow until first pinch, then lock in place.")]
+    public bool keepFollowingRightHandUntilConfirmed = false;
     [Tooltip("World-space offset applied to the final anchor placement pose. Use negative Y to place the anchor below the hand marker.")]
     public Vector3 anchorPlacementWorldOffset = new Vector3(0f, -0.08f, 0f);
 
@@ -153,6 +153,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     private Coroutine clearStatusMessageCoroutine;
     private float pinchStartTime;
     private float lastTapPinchReleaseTime = -999f;
+    private bool pinchStartedWithCandidateLocked;
     private bool hasRelativeAdjustStartPose;
     private Pose lockedCandidatePoseAtAdjustStart;
     private Pose handCandidatePoseAtAdjustStart;
@@ -308,6 +309,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         SetCandidatePoseLockState(false, false);
         pinchStartTime = 0f;
         lastTapPinchReleaseTime = -999f;
+        pinchStartedWithCandidateLocked = false;
         UpdateCandidatePose();
         SetPreviewActive(true);
         placementStatusHint = "Anchor placement started";
@@ -662,10 +664,13 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (pinching && !wasPinching)
         {
             pinchStartTime = now;
-            SetCandidatePoseLockState(candidatePoseLocked, false);
+            pinchStartedWithCandidateLocked = candidatePoseLocked;
+            SetCandidatePoseLockState(true, false);
+            if (!pinchStartedWithCandidateLocked)
+                SetStatusMessage("Anchor pose locked\nRelease, then pinch again to confirm");
         }
 
-        if (pinching && candidatePoseLocked && !adjustingLockedPoseWithHold &&
+        if (pinching && pinchStartedWithCandidateLocked && candidatePoseLocked && !adjustingLockedPoseWithHold &&
             now - pinchStartTime >= Mathf.Max(0.01f, holdToFineAdjustDelaySec))
         {
             BeginRelativePoseAdjustment();
@@ -686,9 +691,8 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
                 lastTapPinchReleaseTime = -999f;
                 SetStatusMessage("Anchor pose locked");
             }
-            else if (!candidatePoseLocked)
+            else if (!pinchStartedWithCandidateLocked)
             {
-                SetCandidatePoseLockState(true, false);
                 lastTapPinchReleaseTime = now;
                 SetStatusMessage("Anchor pose locked\nDouble pinch to confirm");
             }
