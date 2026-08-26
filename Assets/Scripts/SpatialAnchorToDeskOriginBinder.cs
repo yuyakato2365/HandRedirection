@@ -1327,7 +1327,14 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (!EnsureRedirectionOrigin())
             return;
 
-        Vector3 targetPosition = ResolveRedirectionOriginPlacementPosition(GetRightPinchWorldPosition());
+        // While armed, redirectionOrigin is already updated every frame from the
+        // tracked right-hand pose projected onto the desk plane. Commit that exact
+        // preview position so changing from wrist/pointer tracking to PinchPosWorld
+        // cannot make the marker jump on the confirmation frame.
+        Vector3 targetPosition = redirectionOriginPlacementArmed &&
+                                 followRedirectionOriginOnDeskPlaneWhileArmed
+            ? redirectionOrigin.position
+            : ResolveRedirectionOriginPlacementPosition(GetRightHandTrackingWorldPosition());
         Quaternion targetRotation = GetRedirectionOriginRotation();
 
         redirectionOrigin.SetPositionAndRotation(targetPosition, targetRotation);
@@ -1471,7 +1478,10 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         Quaternion visualRotation = redirectionOrigin != null ? redirectionOrigin.rotation : GetRedirectionOriginRotation();
         if (previewArmedPlacement)
         {
-            visualPosition = ResolveRedirectionOriginPreviewPosition(GetRightHandTrackingWorldPosition());
+            // The actual origin already follows the projected hand position while
+            // armed. Render that same transform instead of calculating a second
+            // preview pose through a separate input path.
+            visualPosition = redirectionOrigin.position;
             visualRotation = GetRedirectionOriginRotation();
         }
 
@@ -1650,20 +1660,6 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
 
         redirectionControllers = FindObjectsByType<GoGoInteractionController_NoY3>(FindObjectsSortMode.None);
-    }
-
-    private Vector3 GetRightPinchWorldPosition()
-    {
-        if (rightConfirmPinchProvider != null)
-            return rightConfirmPinchProvider.PinchPosWorld;
-
-        if (TryGetTrackedHandWorldPosition(rightConfirmHand, out Vector3 trackedHandPosition))
-            return trackedHandPosition;
-
-        if (rightConfirmHand != null)
-            return rightConfirmHand.transform.position;
-
-        return redirectionOrigin != null ? redirectionOrigin.position : Vector3.zero;
     }
 
     private Vector3 GetRightHandTrackingWorldPosition()
