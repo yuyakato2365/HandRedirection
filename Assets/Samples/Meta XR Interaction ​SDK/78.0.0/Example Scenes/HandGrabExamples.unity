@@ -2106,6 +2106,7 @@ MonoBehaviour:
   enableRightPinchRedirectionOriginAfterConfirmation: 1
   setRedirectionOriginOnlyOncePerAlignment: 1
   keepRedirectionOriginOnDeskPlane: 1
+  followRedirectionOriginOnDeskPlaneWhileArmed: 1
   persistRedirectionOriginInPlayerPrefs: 1
   applySavedRedirectionOriginOnAlignment: 0
   savedRedirectionOriginPlayerPrefsKey: HandRedirection.RedirectionOriginOffset
@@ -2113,14 +2114,14 @@ MonoBehaviour:
   redirectionControllers: []
   showRedirectionOriginVisual: 1
   redirectionOriginMarkerPrefab: {fileID: 0}
-  redirectionOriginMarkerScale: 0.08
-  redirectionOriginMarkerArmedScaleMultiplier: 1.6
-  previewRedirectionOriginMarkerAtHand: 1
+  redirectionOriginMarkerScale: 0.035
+  redirectionOriginMarkerArmedScaleMultiplier: 1.15
+  previewRedirectionOriginMarkerAtHand: 0
   redirectionOriginMarkerHandOffsetWorld: {x: 0, y: 0.04, z: 0}
   redirectionOriginMarkerTowardViewerMeters: 0.08
   redirectionOriginMarkerViewer: {fileID: 0}
   enableLeftHandRedirectionOriginRotation: 1
-  redirectionOriginMarkerColor: {r: 0, g: 0.9, b: 1, a: 0.85}
+  redirectionOriginMarkerColor: {r: 0, g: 0.9, b: 1, a: 0.35}
   localPositionOffset: {x: 0, y: 0, z: 0}
   localEulerOffset: {x: 0, y: 0, z: 0}
   persistOffsetInPlayerPrefs: 1
@@ -2168,6 +2169,8 @@ MonoBehaviour:
   makeDeskTransparentWhileAdjusting: 0
   adjustingDeskAlpha: 0.501
   transparentDeskRoot: {fileID: 0}
+  fadeGaussianSplatsWhileAdjusting: 1
+  adjustingGaussianSplatOpacityMultiplier: 0.35
   logHandAlignmentDebug: 0
   writeHandAlignmentLogFile: 0
   activePinchLogIntervalSec: 1

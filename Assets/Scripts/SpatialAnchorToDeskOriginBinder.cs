@@ -27,6 +27,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool setRedirectionOriginOnlyOncePerAlignment = true;
     [Tooltip("Keep the redirection origin on the confirmed desk plane, using the right pinch X/Z in desk space.")]
     public bool keepRedirectionOriginOnDeskPlane = true;
+    [Tooltip("While redirection-origin placement is armed, move the origin every frame to the right-hand position projected onto the DeskOrigin plane.")]
+    public bool followRedirectionOriginOnDeskPlaneWhileArmed = true;
     public bool persistRedirectionOriginInPlayerPrefs = true;
     [Tooltip("Automatically restore a saved redirection origin when desk alignment is loaded. Keep false to preserve the old DeskOrigin-based hand pose on startup.")]
     public bool applySavedRedirectionOriginOnAlignment = false;
@@ -37,15 +39,15 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [Header("Redirection Origin Visual")]
     public bool showRedirectionOriginVisual = true;
     public GameObject redirectionOriginMarkerPrefab;
-    public float redirectionOriginMarkerScale = 0.08f;
-    public float redirectionOriginMarkerArmedScaleMultiplier = 1.6f;
-    [Tooltip("While setting redirection origin, show the marker at the hand instead of the desk-projected final position.")]
-    public bool previewRedirectionOriginMarkerAtHand = true;
+    public float redirectionOriginMarkerScale = 0.035f;
+    public float redirectionOriginMarkerArmedScaleMultiplier = 1.15f;
+    [Tooltip("Legacy option for showing the marker at the hand. Desk-plane placement always shows the projected position.")]
+    public bool previewRedirectionOriginMarkerAtHand = false;
     public Vector3 redirectionOriginMarkerHandOffsetWorld = new Vector3(0f, 0.04f, 0f);
     public float redirectionOriginMarkerTowardViewerMeters = 0.08f;
     public Transform redirectionOriginMarkerViewer;
     public bool enableLeftHandRedirectionOriginRotation = true;
-    public Color redirectionOriginMarkerColor = new Color(0f, 0.9f, 1f, 0.85f);
+    public Color redirectionOriginMarkerColor = new Color(0f, 0.9f, 1f, 0.35f);
 
     [Header("Runtime Origin Coordinate Axes")]
     [Tooltip("Show XYZ axes at DeskOrigin and RedirectOrigin while running.")]
@@ -173,6 +175,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private bool wasLeftRedirectionOriginPinching;
     private bool wasLeftFineRedirectionOriginPinching;
     private GameObject redirectionOriginMarkerInstance;
+    private Transform redirectionOriginMarkerCenter;
     private RuntimeCoordinateAxes deskOriginCoordinateAxes;
     private RuntimeCoordinateAxes redirectionOriginCoordinateAxes;
     private float nextActivePinchLogTime;
@@ -1136,6 +1139,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         ApplyRedirectionSuppressionState();
         UpdateRedirectionOriginRotationAdjustment();
 
+        if (followRedirectionOriginOnDeskPlaneWhileArmed && !redirectionOriginSetAfterConfirmation && redirectionOrigin != null)
+        {
+            Vector3 projectedHandPosition = ResolveRedirectionOriginPlacementPosition(GetRightPinchWorldPosition());
+            redirectionOrigin.SetPositionAndRotation(projectedHandPosition, GetRedirectionOriginRotation());
+        }
+
         bool rightPinching = IsRightConfirmPinching();
         if (rightPinching != wasRightRedirectionOriginPinching)
             LogAlignmentEvent($"Right redirection-origin pinch changed {wasRightRedirectionOriginPinching} -> {rightPinching} waitingRelease={waitingForRightRedirectionOriginRelease} {BuildPinchDebugString()}");
@@ -1349,6 +1358,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private Vector3 ResolveRedirectionOriginPreviewPosition(Vector3 sourcePosition)
     {
+        if (keepRedirectionOriginOnDeskPlane)
+            return ResolveRedirectionOriginPlacementPosition(sourcePosition);
+
         if (!previewRedirectionOriginMarkerAtHand)
             return ResolveRedirectionOriginPlacementPosition(sourcePosition);
 
@@ -1467,7 +1479,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         float markerScale = redirectionOriginMarkerScale;
         if (previewArmedPlacement)
             markerScale *= Mathf.Max(1f, redirectionOriginMarkerArmedScaleMultiplier);
-        redirectionOriginMarkerInstance.transform.localScale = Vector3.one * Mathf.Max(0.001f, markerScale);
+        markerScale = Mathf.Max(0.001f, markerScale);
+        if (redirectionOriginMarkerCenter != null)
+        {
+            redirectionOriginMarkerInstance.transform.localScale = Vector3.one;
+            redirectionOriginMarkerCenter.localScale = Vector3.one * markerScale;
+        }
+        else
+        {
+            redirectionOriginMarkerInstance.transform.localScale = Vector3.one * markerScale;
+        }
         SetRedirectionOriginVisualVisible(true);
     }
 
@@ -1483,7 +1504,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         redirectionOriginMarkerInstance.name = "RedirectionOriginMarker";
         redirectionOriginMarkerInstance.transform.SetParent(null, true);
         redirectionOriginMarkerInstance.transform.SetPositionAndRotation(redirectionOrigin.position, redirectionOrigin.rotation);
-        redirectionOriginMarkerInstance.transform.localScale = Vector3.one * Mathf.Max(0.001f, redirectionOriginMarkerScale);
+        redirectionOriginMarkerInstance.transform.localScale = Vector3.one;
+        if (redirectionOriginMarkerCenter != null)
+            redirectionOriginMarkerCenter.localScale = Vector3.one * Mathf.Max(0.001f, redirectionOriginMarkerScale);
+        else
+            redirectionOriginMarkerInstance.transform.localScale = Vector3.one * Mathf.Max(0.001f, redirectionOriginMarkerScale);
         SetRedirectionOriginVisualVisible(IsAlignmentConfirmed);
     }
 
@@ -1494,27 +1519,10 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         sphere.name = "Center";
         sphere.transform.SetParent(root.transform, false);
-        sphere.transform.localScale = Vector3.one;
+        sphere.transform.localScale = Vector3.one * Mathf.Max(0.001f, redirectionOriginMarkerScale);
+        redirectionOriginMarkerCenter = sphere.transform;
         DestroyRuntimeCollider(sphere);
         ApplyRedirectionOriginMarkerMaterial(sphere);
-
-        GameObject forward = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        forward.name = "ForwardAxis";
-        forward.transform.SetParent(root.transform, false);
-        forward.transform.localPosition = new Vector3(0f, 0f, 0.75f);
-        forward.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-        forward.transform.localScale = new Vector3(0.12f, 0.75f, 0.12f);
-        DestroyRuntimeCollider(forward);
-        ApplyRedirectionOriginMarkerMaterial(forward);
-
-        GameObject right = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        right.name = "RightAxis";
-        right.transform.SetParent(root.transform, false);
-        right.transform.localPosition = new Vector3(0.55f, 0f, 0f);
-        right.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
-        right.transform.localScale = new Vector3(0.08f, 0.55f, 0.08f);
-        DestroyRuntimeCollider(right);
-        ApplyRedirectionOriginMarkerMaterial(right);
 
         return root;
     }
@@ -1525,14 +1533,63 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (renderer == null)
             return;
 
-        Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-        if (material.shader == null)
-            material = new Material(Shader.Find("Standard"));
+        Shader shader = FindSupportedRuntimeUnlitShader();
+        if (shader == null)
+            return;
 
-        material.color = redirectionOriginMarkerColor;
+        Color markerColor = redirectionOriginMarkerColor;
+        markerColor.a = Mathf.Clamp(markerColor.a, 0.05f, 0.6f);
+        Material material = new Material(shader)
+        {
+            color = markerColor,
+            hideFlags = HideFlags.DontSave
+        };
         if (material.HasProperty("_BaseColor"))
-            material.SetColor("_BaseColor", redirectionOriginMarkerColor);
+            material.SetColor("_BaseColor", markerColor);
+        if (material.HasProperty("_UnlitColor"))
+            material.SetColor("_UnlitColor", markerColor);
+        ConfigureTransparentRuntimeMaterial(material);
         renderer.sharedMaterial = material;
+    }
+
+    private static Shader FindSupportedRuntimeUnlitShader()
+    {
+        string pipelineName = GraphicsSettings.currentRenderPipeline != null
+            ? GraphicsSettings.currentRenderPipeline.GetType().Name
+            : string.Empty;
+
+        string[] candidates = pipelineName.Contains("HDRenderPipeline")
+            ? new[] { "HDRP/Unlit", "Unlit/Color", "Sprites/Default" }
+            : new[] { "Universal Render Pipeline/Unlit", "Unlit/Color", "Sprites/Default", "Standard" };
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            Shader candidate = Shader.Find(candidates[i]);
+            if (candidate != null && candidate.isSupported)
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static void ConfigureTransparentRuntimeMaterial(Material material)
+    {
+        if (material == null)
+            return;
+
+        if (material.HasProperty("_SurfaceType"))
+            material.SetFloat("_SurfaceType", 1f);
+        if (material.HasProperty("_Surface"))
+            material.SetFloat("_Surface", 1f);
+        if (material.HasProperty("_SrcBlend"))
+            material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+        if (material.HasProperty("_DstBlend"))
+            material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        if (material.HasProperty("_ZWrite"))
+            material.SetFloat("_ZWrite", 0f);
+        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.EnableKeyword("_ALPHABLEND_ON");
+        material.renderQueue = (int)RenderQueue.Transparent;
     }
 
     private void DestroyRuntimeCollider(GameObject target)
@@ -1600,10 +1657,43 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (rightConfirmPinchProvider != null)
             return rightConfirmPinchProvider.PinchPosWorld;
 
-        if (rightConfirmHand != null)
-            return rightConfirmHand.transform.position;
+        if (TryGetTrackedHandWorldPosition(rightConfirmHand, out Vector3 trackedHandPosition))
+            return trackedHandPosition;
 
         return redirectionOrigin != null ? redirectionOrigin.position : Vector3.zero;
+    }
+
+    private static bool TryGetTrackedHandWorldPosition(OVRHand hand, out Vector3 position)
+    {
+        position = default;
+        if (hand == null || !hand.IsTracked)
+            return false;
+
+        OVRSkeleton skeleton = hand.GetComponent<OVRSkeleton>();
+        if (skeleton != null && skeleton.Bones != null)
+        {
+            foreach (OVRBone bone in skeleton.Bones)
+            {
+                if (bone.Id == OVRSkeleton.BoneId.Hand_WristRoot && bone.Transform != null)
+                {
+                    position = bone.Transform.position;
+                    return true;
+                }
+            }
+        }
+
+        if (hand.IsPointerPoseValid)
+        {
+            Transform pointer = hand.GetPointerRayTransform();
+            if (pointer != null)
+            {
+                position = pointer.position;
+                return true;
+            }
+        }
+
+        position = hand.transform.position;
+        return true;
     }
 
     private Quaternion GetRedirectionOriginRotation()
@@ -1702,16 +1792,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void UpdateDeskTransparencyForPlacementState()
     {
-        if (!IsAdjustingAlignment)
-            return;
-
         if (previewDeskDuringAnchorPlacement && anchorPlacer != null && anchorPlacer.IsPlacementMode)
         {
             SetDeskTransparency(true);
             return;
         }
 
-        SetDeskTransparency(true);
+        SetDeskTransparency(IsAdjustingAlignment);
     }
 
     private void ApplyDeskTransparency()

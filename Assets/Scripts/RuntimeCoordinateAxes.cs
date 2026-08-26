@@ -64,7 +64,9 @@ public sealed class RuntimeCoordinateAxes : MonoBehaviour
         line.endColor = color;
         line.shadowCastingMode = ShadowCastingMode.Off;
         line.receiveShadows = false;
-        line.material = CreateUnlitMaterial(color);
+        Material axisMaterial = CreateUnlitMaterial(color);
+        if (axisMaterial != null)
+            line.sharedMaterial = axisMaterial;
 
         if (!showLabels)
             return;
@@ -85,10 +87,29 @@ public sealed class RuntimeCoordinateAxes : MonoBehaviour
 
     private static Material CreateUnlitMaterial(Color color)
     {
-        Shader shader = Shader.Find("HDRP/Unlit")
-            ?? Shader.Find("Universal Render Pipeline/Unlit")
-            ?? Shader.Find("Unlit/Color")
-            ?? Shader.Find("Sprites/Default");
+        string pipelineName = GraphicsSettings.currentRenderPipeline != null
+            ? GraphicsSettings.currentRenderPipeline.GetType().Name
+            : string.Empty;
+        string[] candidates = pipelineName.Contains("HDRenderPipeline")
+            ? new[] { "HDRP/Unlit", "Unlit/Color", "Sprites/Default" }
+            : new[] { "Universal Render Pipeline/Unlit", "Unlit/Color", "Sprites/Default", "Standard" };
+
+        Shader shader = null;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            Shader candidate = Shader.Find(candidates[i]);
+            if (candidate != null && candidate.isSupported)
+            {
+                shader = candidate;
+                break;
+            }
+        }
+
+        if (shader == null)
+        {
+            Debug.LogError("[RuntimeCoordinateAxes] No supported unlit shader was found for the active render pipeline.");
+            return null;
+        }
 
         Material material = new Material(shader)
         {

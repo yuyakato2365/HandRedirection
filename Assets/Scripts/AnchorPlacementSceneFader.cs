@@ -19,11 +19,9 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         "LoadedPersistentDeskAnchorMarker",
         "PCVRSessionAnchorMarker",
         "Anchor",
-        "Hand",
         "Controller",
         "Camera",
         "Passthrough",
-        "Scaniverse",
         "Status",
         "Text",
         "GeneratedHandLocalScaniverseOverlay",
@@ -80,8 +78,7 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         if (deskBinder == null)
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
 
-        bool rotationAdjustmentActive = deskBinder != null && deskBinder.IsAdjustingAlignment;
-        bool shouldFade = anchorPlacer != null && anchorPlacer.IsPlacementMode && !rotationAdjustmentActive;
+        bool shouldFade = anchorPlacer != null && anchorPlacer.IsPlacementMode;
         if (shouldFade)
             ApplyFade();
         else
@@ -170,6 +167,24 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
             {
                 if (deskVisuals[i] != null)
                     AddRoot(roots, deskVisuals[i].transform);
+            }
+        }
+
+        DeskScaleSliderPanel[] deskSliders = FindObjectsByType<DeskScaleSliderPanel>(FindObjectsSortMode.None);
+        if (deskSliders != null)
+        {
+            for (int i = 0; i < deskSliders.Length; i++)
+            {
+                DeskScaleSliderPanel slider = deskSliders[i];
+                if (slider == null)
+                    continue;
+
+                AddRoot(roots, slider.primaryDeskReference);
+                if (slider.scaniverseDeformationRoots == null)
+                    continue;
+
+                for (int rootIndex = 0; rootIndex < slider.scaniverseDeformationRoots.Length; rootIndex++)
+                    AddRoot(roots, slider.scaniverseDeformationRoots[rootIndex]);
             }
         }
     }
