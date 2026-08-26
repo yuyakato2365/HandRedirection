@@ -292,8 +292,6 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
 
     private void OnDeskAlignmentChanged()
     {
-        ClearAnchorPlacementFaders();
-
         if (placer != null && deskBinder != null && deskBinder.IsAdjustingAlignment)
             placer.SetStatusMessage($"Left pinch rotates desk in 3D\nRight pinch confirms\nYaw offset: {deskBinder.CurrentYawAdjustmentDegrees:0.###} deg");
 
@@ -440,16 +438,4 @@ public class SpatialAnchorRedirectionToggle : MonoBehaviour
         }
     }
 
-    private static void ClearAnchorPlacementFaders()
-    {
-        AnchorPlacementSceneFader[] faders = FindObjectsByType<AnchorPlacementSceneFader>(FindObjectsSortMode.None);
-        if (faders == null)
-            return;
-
-        for (int i = 0; i < faders.Length; i++)
-        {
-            if (faders[i] != null)
-                faders[i].ClearFadeNow();
-        }
-    }
 }

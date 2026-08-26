@@ -1141,7 +1141,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         if (followRedirectionOriginOnDeskPlaneWhileArmed && !redirectionOriginSetAfterConfirmation && redirectionOrigin != null)
         {
-            Vector3 projectedHandPosition = ResolveRedirectionOriginPlacementPosition(GetRightPinchWorldPosition());
+            Vector3 projectedHandPosition = ResolveRedirectionOriginPlacementPosition(GetRightHandTrackingWorldPosition());
             redirectionOrigin.SetPositionAndRotation(projectedHandPosition, GetRedirectionOriginRotation());
         }
 
@@ -1471,7 +1471,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         Quaternion visualRotation = redirectionOrigin != null ? redirectionOrigin.rotation : GetRedirectionOriginRotation();
         if (previewArmedPlacement)
         {
-            visualPosition = ResolveRedirectionOriginPreviewPosition(GetRightPinchWorldPosition());
+            visualPosition = ResolveRedirectionOriginPreviewPosition(GetRightHandTrackingWorldPosition());
             visualRotation = GetRedirectionOriginRotation();
         }
 
@@ -1660,6 +1660,23 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (TryGetTrackedHandWorldPosition(rightConfirmHand, out Vector3 trackedHandPosition))
             return trackedHandPosition;
 
+        if (rightConfirmHand != null)
+            return rightConfirmHand.transform.position;
+
+        return redirectionOrigin != null ? redirectionOrigin.position : Vector3.zero;
+    }
+
+    private Vector3 GetRightHandTrackingWorldPosition()
+    {
+        if (TryGetTrackedHandWorldPosition(rightConfirmHand, out Vector3 trackedHandPosition))
+            return trackedHandPosition;
+
+        if (rightConfirmPinchProvider != null)
+            return rightConfirmPinchProvider.PinchPosWorld;
+
+        if (rightConfirmHand != null)
+            return rightConfirmHand.transform.position;
+
         return redirectionOrigin != null ? redirectionOrigin.position : Vector3.zero;
     }
 
@@ -1692,8 +1709,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             }
         }
 
-        position = hand.transform.position;
-        return true;
+        return false;
     }
 
     private Quaternion GetRedirectionOriginRotation()

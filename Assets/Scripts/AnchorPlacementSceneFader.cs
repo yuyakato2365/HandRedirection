@@ -43,6 +43,8 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         public float mode;
         public bool hasSurface;
         public float surface;
+        public bool hasSurfaceType;
+        public float surfaceType;
         public bool hasSrcBlend;
         public float srcBlend;
         public bool hasDstBlend;
@@ -270,6 +272,8 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
             mode = material.HasProperty("_Mode") ? material.GetFloat("_Mode") : 0f,
             hasSurface = material.HasProperty("_Surface"),
             surface = material.HasProperty("_Surface") ? material.GetFloat("_Surface") : 0f,
+            hasSurfaceType = material.HasProperty("_SurfaceType"),
+            surfaceType = material.HasProperty("_SurfaceType") ? material.GetFloat("_SurfaceType") : 0f,
             hasSrcBlend = material.HasProperty("_SrcBlend"),
             srcBlend = material.HasProperty("_SrcBlend") ? material.GetFloat("_SrcBlend") : 0f,
             hasDstBlend = material.HasProperty("_DstBlend"),
@@ -300,6 +304,8 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
             material.SetFloat("_Mode", 3f);
         if (material.HasProperty("_Surface"))
             material.SetFloat("_Surface", 1f);
+        if (material.HasProperty("_SurfaceType"))
+            material.SetFloat("_SurfaceType", 1f);
         if (material.HasProperty("_SrcBlend"))
             material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
         if (material.HasProperty("_DstBlend"))
@@ -309,6 +315,7 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
 
         material.EnableKeyword("_ALPHABLEND_ON");
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        material.EnableKeyword("_ENABLE_FOG_ON_TRANSPARENT");
         material.renderQueue = (int)RenderQueue.Transparent;
     }
 
@@ -326,6 +333,8 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
             material.SetFloat("_Mode", state.mode);
         if (state.hasSurface)
             material.SetFloat("_Surface", state.surface);
+        if (state.hasSurfaceType)
+            material.SetFloat("_SurfaceType", state.surfaceType);
         if (state.hasSrcBlend)
             material.SetFloat("_SrcBlend", state.srcBlend);
         if (state.hasDstBlend)
@@ -333,10 +342,13 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         if (state.hasZWrite)
             material.SetFloat("_ZWrite", state.zWrite);
 
-        if ((!state.hasMode || state.mode < 2.5f) && (!state.hasSurface || state.surface < 0.5f))
+        if ((!state.hasMode || state.mode < 2.5f) &&
+            (!state.hasSurface || state.surface < 0.5f) &&
+            (!state.hasSurfaceType || state.surfaceType < 0.5f))
         {
             material.DisableKeyword("_ALPHABLEND_ON");
             material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.DisableKeyword("_ENABLE_FOG_ON_TRANSPARENT");
         }
 
         material.renderQueue = state.renderQueue;
