@@ -80,11 +80,20 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         if (deskBinder == null)
             deskBinder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
 
-        bool shouldFade = anchorPlacer != null && anchorPlacer.IsPlacementMode;
+        bool shouldFade = IsPlacementVisualFadeActive(anchorPlacer, deskBinder);
         if (shouldFade)
             ApplyFade();
         else
             RestoreFade();
+    }
+
+    public static bool IsPlacementVisualFadeActive(
+        ManualSpatialAnchorPlacer placer,
+        SpatialAnchorToDeskOriginBinder binder)
+    {
+        bool anchorPlacementActive = placer != null && (placer.IsPlacementMode || placer.IsCreatingAnchor);
+        bool deskAlignmentActive = binder != null && binder.IsAdjustingAlignment;
+        return anchorPlacementActive || deskAlignmentActive;
     }
 
     private void ApplyFade()

@@ -1808,7 +1808,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void UpdateDeskTransparencyForPlacementState()
     {
-        if (previewDeskDuringAnchorPlacement && anchorPlacer != null && anchorPlacer.IsPlacementMode)
+        if (previewDeskDuringAnchorPlacement &&
+            anchorPlacer != null &&
+            (anchorPlacer.IsPlacementMode || anchorPlacer.IsCreatingAnchor))
         {
             SetDeskTransparency(true);
             return;

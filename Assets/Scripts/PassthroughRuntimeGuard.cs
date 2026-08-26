@@ -29,6 +29,9 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         "Scaniverse 2026-05-20 114107"
     };
 
+    private ManualSpatialAnchorPlacer anchorPlacer;
+    private SpatialAnchorToDeskOriginBinder deskBinder;
+
     private IEnumerator Start()
     {
         yield return null;
@@ -66,6 +69,17 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (anchorPlacer == null)
+            anchorPlacer = FindFirstObjectByType<ManualSpatialAnchorPlacer>();
+        if (deskBinder == null)
+            deskBinder = FindFirstObjectByType<SpatialAnchorToDeskOriginBinder>();
+
+        // The placement fader owns material surface/blend state while this is active.
+        // Re-normalizing the same materials to opaque here caused both failed fading
+        // and visible frame-to-frame flashing depending on script execution order.
+        if (AnchorPlacementSceneFader.IsPlacementVisualFadeActive(anchorPlacer, deskBinder))
+            return;
+
         ConfigureActiveScaniverseMaterials(false);
     }
 
@@ -315,6 +329,8 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         occlusion.doNotAutoEnableNameEquals = new[] { "Root", "root" };
         occlusion.autoFindHands = true;
         occlusion.hideOverlayDuringAnchorPlacement = false;
+        occlusion.fadeOverlayDuringAnchorPlacement = true;
+        occlusion.anchorPlacementOpacityMultiplier = 0.28f;
         occlusion.anchorPlacer = FindFirstObjectByType<ManualSpatialAnchorPlacer>();
         occlusion.deskBinder = FindFirstObjectByType<SpatialAnchorToDeskOriginBinder>();
         occlusion.preferGoGoOriginalHandSources = true;

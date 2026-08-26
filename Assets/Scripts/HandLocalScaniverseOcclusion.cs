@@ -56,6 +56,9 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
 
     [Header("Placement Safety")]
     public bool hideOverlayDuringAnchorPlacement = false;
+    [Tooltip("Fade the generated hand-local 3DGS/Scaniverse overlay while anchor and desk alignment are being configured.")]
+    public bool fadeOverlayDuringAnchorPlacement = true;
+    [Range(0.05f, 1f)] public float anchorPlacementOpacityMultiplier = 0.28f;
     public ManualSpatialAnchorPlacer anchorPlacer;
     public SpatialAnchorToDeskOriginBinder deskBinder;
 
@@ -168,6 +171,7 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
 
         AutoAssignReferences();
 
+        bool placementVisualFadeActive = AnchorPlacementSceneFader.IsPlacementVisualFadeActive(anchorPlacer, deskBinder);
         bool rotationAdjustmentActive = deskBinder != null && deskBinder.IsAdjustingAlignment;
         if (hideOverlayDuringAnchorPlacement && !rotationAdjustmentActive && anchorPlacer != null && (anchorPlacer.IsPlacementMode || anchorPlacer.IsCreatingAnchor))
         {
@@ -182,6 +186,10 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
         ResolveForearmBoxMask(true, leftHand, leftIndexTip, leftElbowOverride, out Vector4 leftForearmStart, out Vector4 leftForearmEnd, out Vector4 leftForearmRight, out Vector4 leftForearmUp);
         ResolveForearmBoxMask(false, rightHand, rightIndexTip, rightElbowOverride, out Vector4 rightForearmStart, out Vector4 rightForearmEnd, out Vector4 rightForearmRight, out Vector4 rightForearmUp);
         int objectMaskCount = CollectObjectMaskPositions();
+
+        float effectiveOpacity = opacity;
+        if (fadeOverlayDuringAnchorPlacement && placementVisualFadeActive)
+            effectiveOpacity *= Mathf.Clamp01(anchorPlacementOpacityMultiplier);
 
         for (int i = 0; i < generatedObjects.Count; i++)
         {
@@ -220,7 +228,7 @@ public sealed class HandLocalScaniverseOcclusion : MonoBehaviour
             propertyBlock.SetFloat(ObjectMaskFeatherId, Mathf.Max(0.0001f, objectMaskFeatherMeters));
             propertyBlock.SetFloat(ObjectMaskDepthBiasId, Mathf.Max(0f, objectMaskDepthBiasMeters));
             propertyBlock.SetFloat(MaskSoftnessId, Mathf.Max(0.001f, maskSoftness));
-            propertyBlock.SetFloat(OpacityId, opacity);
+            propertyBlock.SetFloat(OpacityId, effectiveOpacity);
             renderer.SetPropertyBlock(propertyBlock);
         }
     }
