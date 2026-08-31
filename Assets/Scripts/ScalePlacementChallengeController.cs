@@ -25,7 +25,9 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
     [Serializable]
     private struct SavedPatternSettings
     {
+        public int version;
         public string targetObjectId;
+        public Vector2 deskLocalPosition;
         public Vector3 targetScaleRatio;
         public Vector3 scaleToleranceRatio;
         public Vector3 positionToleranceMeters;
@@ -240,18 +242,21 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
 
     private void ResolveActiveEntry()
     {
-        activeEntry = null;
-        if (activePattern == null || redirectionController == null || redirectionController.objects == null) return;
+        activeEntry = FindEntryForPattern(activePattern);
+        CaptureBaselineScale(activeEntry);
+    }
+
+    private GoGoInteractionController_NoY3.WarpObjectEntry FindEntryForPattern(Pattern pattern)
+    {
+        if (pattern == null || redirectionController == null || redirectionController.objects == null)
+            return null;
         for (int i = 0; i < redirectionController.objects.Count; i++)
         {
             GoGoInteractionController_NoY3.WarpObjectEntry entry = redirectionController.objects[i];
-            if (entry != null && entry.enabled && string.Equals(entry.name, activePattern.targetObjectId, StringComparison.OrdinalIgnoreCase))
-            {
-                activeEntry = entry;
-                CaptureBaselineScale(entry);
-                return;
-            }
+            if (entry != null && entry.enabled && string.Equals(entry.name, pattern.targetObjectId, StringComparison.OrdinalIgnoreCase))
+                return entry;
         }
+        return null;
     }
 
     private void CaptureBaselineScale(GoGoInteractionController_NoY3.WarpObjectEntry entry)
@@ -343,6 +348,59 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         return true;
     }
 
+    public bool TryGetPatternLayout(
+        string patternId,
+        out string targetObjectId,
+        out Vector2 deskPosition,
+        out Vector2 calculatedRingRadii)
+    {
+        ResolveReferences();
+        Pattern pattern = FindPattern(patternId);
+        if (pattern == null)
+        {
+            targetObjectId = "";
+            deskPosition = Vector2.zero;
+            calculatedRingRadii = new Vector2(0.12f, 0.12f);
+            return false;
+        }
+
+        targetObjectId = pattern.targetObjectId;
+        deskPosition = GetDeskOriginRelativePosition(pattern);
+        GoGoInteractionController_NoY3.WarpObjectEntry entry = FindEntryForPattern(pattern);
+        if (!TryCalculatePatternGeometry(pattern, entry, out _, out calculatedRingRadii))
+            calculatedRingRadii = new Vector2(0.12f, 0.12f);
+        return true;
+    }
+
+    public bool SetPatternPosition(string patternId, Vector2 deskPosition, bool save = true)
+    {
+        ResolveReferences();
+        Pattern pattern = FindPattern(patternId);
+        if (pattern == null || deskOrigin == null || !IsFinite(deskPosition.x) || !IsFinite(deskPosition.y))
+            return false;
+
+        GetPatternAxes(out Vector3 patternRight, out Vector3 up, out Vector3 patternForward);
+        GetDeskPlanarAxes(up, out Vector3 deskRight, out Vector3 deskForward);
+        Transform origin = redirectionOrigin != null ? redirectionOrigin : deskOrigin;
+        Vector3 desiredWorld = deskOrigin.position + deskRight * deskPosition.x + deskForward * deskPosition.y;
+        Vector3 originOnDeskPlane = origin.position;
+        float originHeight = Vector3.Dot(originOnDeskPlane - deskOrigin.position, up);
+        originOnDeskPlane -= up * originHeight;
+        Vector3 delta = desiredWorld - originOnDeskPlane;
+        pattern.deskLocalPosition = new Vector2(
+            Vector3.Dot(delta, patternRight),
+            Vector3.Dot(delta, patternForward));
+        if (save)
+            SavePatternSettings(pattern);
+        if (activePattern == pattern)
+            UpdateRingPose();
+        Debug.Log(
+            $"[ScalePlacementChallenge] Pattern {pattern.id} position updated " +
+            $"DeskOriginLocalXZ=({deskPosition.x:F3},{deskPosition.y:F3}) " +
+            $"storedRedirectionXZ=({pattern.deskLocalPosition.x:F3},{pattern.deskLocalPosition.y:F3})");
+        return true;
+    }
+
     private void ComputeTargetRingSize()
     {
         ringRadii = new Vector2(0.12f, 0.12f);
@@ -353,46 +411,60 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         if (activeEntry == null || activeEntry.warpedObject == null || activePattern == null)
             return;
 
-        Transform scaleSource = activeEntry.warpedScaleSource != null ? activeEntry.warpedScaleSource : activeEntry.warpedObject;
-        GetObjectMeasurementAxes(scaleSource, out Vector3 sizeX, out Vector3 sizeY, out Vector3 sizeZ);
-        CaptureBaselineScale(activeEntry);
-        Vector3 baselineScale = baselineScaleByEntry.TryGetValue(activeEntry, out Vector3 capturedScale)
-            ? capturedScale
-            : scaleSource.localScale;
-        Vector3 desiredScale = Vector3.Scale(baselineScale, activePattern.targetScaleRatio);
-
-        // Evaluate the renderers at the requested scale without modifying the
-        // live object. Dividing the current world bounds by local X/Y/Z ratios
-        // was only valid for axis-aligned models and produced incorrect B/C
-        // rings when their mesh hierarchy or rotation differed from A.
-        if (!TryGetVisualHalfExtentsAtScale(
-                activeEntry.warpedObject, scaleSource, desiredScale,
-                sizeX, sizeY, sizeZ, out _, out Vector3 targetHalfExtents))
+        if (!TryCalculatePatternGeometry(activePattern, activeEntry, out Vector3 targetHalfExtents, out Vector2 calculatedRadii))
             return;
         targetObjectHalfExtents = MaxComponents(targetHalfExtents, 0.005f);
         targetObjectLongestHalfExtent = MaxComponent(targetObjectHalfExtents);
         activeTargetUsesUniformScale = ApproximatelyUniform(activePattern.targetScaleRatio);
-        if (activeTargetUsesUniformScale)
-        {
-            // Uniform N-times mode uses the selected object's longest visible
-            // X/Y/Z dimension as its diameter. The tabletop ring is therefore
-            // a true circle and is independent of the model's aspect ratio.
-            float radius = Mathf.Max(0.04f, targetObjectLongestHalfExtent + activePattern.ringPaddingMeters);
-            ringRadii = new Vector2(radius, radius);
-        }
-        else
-        {
-            ringRadii = new Vector2(
-                Mathf.Max(0.04f, targetObjectHalfExtents.x + activePattern.ringPaddingMeters),
-                Mathf.Max(0.04f, targetObjectHalfExtents.z + activePattern.ringPaddingMeters));
-        }
+        ringRadii = calculatedRadii;
         targetObjectHalfHeight = targetObjectHalfExtents.y;
+        Transform scaleSource = activeEntry.warpedScaleSource != null ? activeEntry.warpedScaleSource : activeEntry.warpedObject;
+        Vector3 baselineScale = baselineScaleByEntry.TryGetValue(activeEntry, out Vector3 capturedScale) ? capturedScale : scaleSource.localScale;
+        Vector3 desiredScale = Vector3.Scale(baselineScale, activePattern.targetScaleRatio);
         Debug.Log(
             $"[ScalePlacementChallenge] Pattern {activePattern.id} ring rebuilt " +
             $"object={activePattern.targetObjectId} measurement=object_local_axes " +
             $"targetScale={activePattern.targetScaleRatio:F3} baselineScale={baselineScale:F3} " +
             $"desiredScale={desiredScale:F3} targetHalfExtents={targetObjectHalfExtents:F3} " +
             $"ringRadii=({ringRadii.x:F3},{ringRadii.y:F3})");
+    }
+
+    private bool TryCalculatePatternGeometry(
+        Pattern pattern,
+        GoGoInteractionController_NoY3.WarpObjectEntry entry,
+        out Vector3 targetHalfExtents,
+        out Vector2 calculatedRadii)
+    {
+        targetHalfExtents = new Vector3(0.095f, 0.05f, 0.095f);
+        calculatedRadii = new Vector2(0.12f, 0.12f);
+        if (pattern == null || entry == null || entry.warpedObject == null)
+            return false;
+
+        Transform scaleSource = entry.warpedScaleSource != null ? entry.warpedScaleSource : entry.warpedObject;
+        GetObjectMeasurementAxes(scaleSource, out Vector3 sizeX, out Vector3 sizeY, out Vector3 sizeZ);
+        CaptureBaselineScale(entry);
+        Vector3 baselineScale = baselineScaleByEntry.TryGetValue(entry, out Vector3 capturedScale)
+            ? capturedScale
+            : scaleSource.localScale;
+        Vector3 desiredScale = Vector3.Scale(baselineScale, pattern.targetScaleRatio);
+        if (!TryGetVisualHalfExtentsAtScale(
+                entry.warpedObject, scaleSource, desiredScale,
+                sizeX, sizeY, sizeZ, out _, out targetHalfExtents))
+            return false;
+
+        targetHalfExtents = MaxComponents(targetHalfExtents, 0.005f);
+        if (ApproximatelyUniform(pattern.targetScaleRatio))
+        {
+            float radius = Mathf.Max(0.04f, MaxComponent(targetHalfExtents) + pattern.ringPaddingMeters);
+            calculatedRadii = new Vector2(radius, radius);
+        }
+        else
+        {
+            calculatedRadii = new Vector2(
+                Mathf.Max(0.04f, targetHalfExtents.x + pattern.ringPaddingMeters),
+                Mathf.Max(0.04f, targetHalfExtents.z + pattern.ringPaddingMeters));
+        }
+        return true;
     }
 
     private bool EvaluateCurrentTarget()
@@ -461,16 +533,42 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
 
     private Vector3 GetRingCenter()
     {
-        if (deskOrigin == null || activePattern == null) return transform.position;
+        return GetRingCenter(activePattern);
+    }
+
+    private Vector3 GetRingCenter(Pattern pattern)
+    {
+        if (deskOrigin == null || pattern == null) return transform.position;
         GetPatternAxes(out Vector3 right, out Vector3 up, out Vector3 forward);
         Transform origin = redirectionOrigin != null ? redirectionOrigin : deskOrigin;
         Vector3 basePosition = origin.position;
         float baseHeight = Vector3.Dot(basePosition - deskOrigin.position, up);
         basePosition += up * (tabletopHeight - baseHeight);
         return basePosition
-            + right * activePattern.deskLocalPosition.x
-            + forward * activePattern.deskLocalPosition.y
+            + right * pattern.deskLocalPosition.x
+            + forward * pattern.deskLocalPosition.y
             + up * tabletopLiftMeters;
+    }
+
+    private Vector2 GetDeskOriginRelativePosition(Pattern pattern)
+    {
+        if (deskOrigin == null || pattern == null)
+            return pattern != null ? pattern.deskLocalPosition : Vector2.zero;
+        Vector3 up = deskOrigin.up.normalized;
+        GetDeskPlanarAxes(up, out Vector3 deskRight, out Vector3 deskForward);
+        Vector3 delta = GetRingCenter(pattern) - deskOrigin.position;
+        return new Vector2(Vector3.Dot(delta, deskRight), Vector3.Dot(delta, deskForward));
+    }
+
+    private void GetDeskPlanarAxes(Vector3 up, out Vector3 deskRight, out Vector3 deskForward)
+    {
+        deskForward = Vector3.ProjectOnPlane(deskOrigin.forward, up).normalized;
+        if (deskForward.sqrMagnitude < 1e-6f)
+            deskForward = Vector3.forward;
+        deskRight = Vector3.Cross(up, deskForward).normalized;
+        Vector3 sourceRight = Vector3.ProjectOnPlane(deskOrigin.right, up).normalized;
+        if (sourceRight.sqrMagnitude > 1e-6f && Vector3.Dot(deskRight, sourceRight) < 0f)
+            deskRight = -deskRight;
     }
 
     private Vector3 GetExpectedObjectCenter(Vector3 up)
@@ -683,6 +781,8 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
                 SavedPatternSettings saved = JsonUtility.FromJson<SavedPatternSettings>(json);
                 if (!string.IsNullOrWhiteSpace(saved.targetObjectId))
                     pattern.targetObjectId = saved.targetObjectId.Trim();
+                if (saved.version >= 2)
+                    pattern.deskLocalPosition = saved.deskLocalPosition;
                 pattern.targetScaleRatio = MaxComponents(saved.targetScaleRatio, 0.01f);
                 pattern.scaleToleranceRatio = MaxComponents(saved.scaleToleranceRatio, 0f);
                 pattern.positionToleranceMeters = MaxComponents(saved.positionToleranceMeters, 0.001f);
@@ -700,7 +800,9 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             return;
         SavedPatternSettings saved = new SavedPatternSettings
         {
+            version = 2,
             targetObjectId = pattern.targetObjectId,
+            deskLocalPosition = pattern.deskLocalPosition,
             targetScaleRatio = pattern.targetScaleRatio,
             scaleToleranceRatio = pattern.scaleToleranceRatio,
             positionToleranceMeters = pattern.positionToleranceMeters
@@ -735,6 +837,11 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             Mathf.Abs(baseline.x) > 1e-6f ? Mathf.Abs(current.x / baseline.x) : 1f,
             Mathf.Abs(baseline.y) > 1e-6f ? Mathf.Abs(current.y / baseline.y) : 1f,
             Mathf.Abs(baseline.z) > 1e-6f ? Mathf.Abs(current.z / baseline.z) : 1f);
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
     }
 
     private static bool IsChallengeObjectRenderer(Renderer renderer)

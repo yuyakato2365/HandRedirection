@@ -880,6 +880,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         if (parts.Length == 0 ||
             (parts[0] != "GET_TARGET_RING_PATTERN" && parts[0] != "SET_TARGET_RING_PATTERN" &&
              parts[0] != "GET_TARGET_RING_SETTINGS" && parts[0] != "SET_TARGET_RING_SETTINGS" &&
+             parts[0] != "GET_TARGET_RING_LAYOUT" && parts[0] != "SET_TARGET_RING_POSITION" &&
              parts[0] != "DISABLE_TARGET_RING_CHALLENGE"))
             return false;
 
@@ -914,6 +915,34 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts[0] == "GET_TARGET_RING_LAYOUT")
+        {
+            if (parts.Length != 1)
+            {
+                SendStatus("ERROR target_ring_layout_format");
+                return true;
+            }
+            SendTargetRingLayoutStatus("A");
+            SendTargetRingLayoutStatus("B");
+            SendTargetRingLayoutStatus("C");
+            return true;
+        }
+
+        if (parts[0] == "SET_TARGET_RING_POSITION")
+        {
+            if (parts.Length != 4 ||
+                !TryParseInvariant(parts[2], out float deskX) ||
+                !TryParseInvariant(parts[3], out float deskZ) ||
+                Mathf.Abs(deskX) > 5f || Mathf.Abs(deskZ) > 5f ||
+                !scalePlacementChallenge.SetPatternPosition(parts[1], new Vector2(deskX, deskZ)))
+            {
+                SendStatus("ERROR target_ring_position_format");
+                return true;
+            }
+            SendTargetRingLayoutStatus(parts[1]);
+            return true;
+        }
+
         if (parts[0] == "SET_TARGET_RING_SETTINGS")
         {
             // New format includes the target object ID after the pattern ID.
@@ -944,6 +973,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                 return true;
             }
             SendTargetRingSettingsStatus(parts[1]);
+            SendTargetRingLayoutStatus(parts[1]);
             return true;
         }
 
@@ -991,6 +1021,24 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             scale.x, scale.y, scale.z,
             scaleTolerance.x, scaleTolerance.y, scaleTolerance.z,
             positionTolerance.x, positionTolerance.y, positionTolerance.z));
+    }
+
+    private void SendTargetRingLayoutStatus(string patternId)
+    {
+        if (!scalePlacementChallenge.TryGetPatternLayout(
+                patternId, out string targetObjectId,
+                out Vector2 deskPosition, out Vector2 radii))
+        {
+            SendStatus($"ERROR target_ring_pattern_not_found {patternId}");
+            return;
+        }
+        string message = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "TARGET_RING_LAYOUT {0} {1} {2:R} {3:R} {4:R} {5:R}",
+            patternId.ToUpperInvariant(), targetObjectId,
+            deskPosition.x, deskPosition.y, radii.x, radii.y);
+        Debug.Log($"[TargetRingLayout] {message}");
+        SendStatus(message);
     }
 
     private string GetCurrentTargetObjectId(string patternId)
