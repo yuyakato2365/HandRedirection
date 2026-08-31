@@ -74,7 +74,38 @@ function GazeRow{if($gazeGrid.SelectedRows.Count-eq0){throw 'Select one gaze obj
 function Num($r,$i){$n=0.0;if(![double]::TryParse([string]$r.Cells[$i].Value,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$n)){throw 'Use numbers such as 0.02 or -5.'};$n.ToString('R',[Globalization.CultureInfo]::InvariantCulture)}
 function TextNum($box){$n=0.0;if(![double]::TryParse($box.Text,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$n)){throw 'Use meters such as 0.05 or -0.02.'};$n.ToString('R',[Globalization.CultureInfo]::InvariantCulture)}
 function UpdateRingMapSizeFromRow($r){if(!$r){return};$id=[string]$r.Cells[0].Value;$target=[string]$r.Cells[1].Value;$sx=[double]$r.Cells[2].Value;$sy=[double]$r.Cells[3].Value;$sz=[double]$r.Cells[4].Value;$base=@{'1'=0.12;'3'=0.094;'4'=0.137};$longest=if($base.ContainsKey($target)){[double]$base[$target]}else{0.12};$layout=$script:ringLayouts[$id];if([math]::Abs($sx-$sy)-lt0.000001-and[math]::Abs($sx-$sz)-lt0.000001){$layout.RadiusX=$longest*$sx;$layout.RadiusZ=$layout.RadiusX}else{$layout.RadiusX=$longest*$sx;$layout.RadiusZ=$longest*$sz};if($ringMap){$ringMap.Invalidate()}}
-function PaintRingMap($sender,$e){$g=$e.Graphics;$g.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::AntiAlias;$w=$sender.ClientSize.Width;$h=$sender.ClientSize.Height;$range=1.35;$scale=[math]::Min(($w-70)/(2*$range),($h-54)/(2*$range));$cx=$w/2;$cy=$h/2;$script:ringMapPixelsPerMeter=$scale;$script:ringMapCenterX=$cx;$script:ringMapCenterY=$cy;$gridPen=[Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#D8E0EC'),1);$axisPen=[Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#64748B'),2);for($m=-1.0;$m-le1.0;$m+=0.25){$px=$cx+$m*$scale;$py=$cy-$m*$scale;$g.DrawLine($gridPen,$px,18,$px,$h-18);$g.DrawLine($gridPen,18,$py,$w-18,$py)};$g.DrawLine($axisPen,18,$cy,$w-18,$cy);$g.DrawLine($axisPen,$cx,18,$cx,$h-18);$originBrush=[Drawing.SolidBrush]::new([Drawing.ColorTranslator]::FromHtml('#17233C'));$g.FillEllipse($originBrush,$cx-6,$cy-6,12,12);$small=[Drawing.Font]::new('Segoe UI Semibold',8.5);$g.DrawString('DeskOrigin',$small,$originBrush,$cx+8,$cy+6);$g.DrawString('+X RIGHT',$small,$originBrush,$w-86,$cy+5);$g.DrawString('+Z FORWARD',$small,$originBrush,$cx+8,2);$colors=@{A='#2563EB';B='#F59E0B';C='#DB2777'};foreach($id in @('A','B','C')){$v=$script:ringLayouts[$id];$px=$cx+$v.X*$scale;$py=$cy-$v.Z*$scale;$rx=[math]::Max(5,$v.RadiusX*$scale);$rz=[math]::Max(5,$v.RadiusZ*$scale);$color=[Drawing.ColorTranslator]::FromHtml($colors[$id]);$fill=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(45,$color));$pen=[Drawing.Pen]::new($color,(if($id-eq$script:selectedRingPattern){4}else{2}));$g.FillEllipse($fill,$px-$rx,$py-$rz,2*$rx,2*$rz);$g.DrawEllipse($pen,$px-$rx,$py-$rz,2*$rx,2*$rz);$labelBrush=[Drawing.SolidBrush]::new($color);$g.DrawString("$id  X=$($v.X.ToString('0.00'))  Z=$($v.Z.ToString('0.00'))`nR=$($v.RadiusX.ToString('0.00'))m",$small,$labelBrush,$px-$rx,$py-$rz-31);$fill.Dispose();$pen.Dispose();$labelBrush.Dispose()};$gridPen.Dispose();$axisPen.Dispose();$originBrush.Dispose();$small.Dispose()}
+function PaintRingMap($sender,$e){
+ $g=$e.Graphics
+ $g.SmoothingMode=[Drawing.Drawing2D.SmoothingMode]::AntiAlias
+ $w=$sender.ClientSize.Width;$h=$sender.ClientSize.Height;$range=1.35
+ $scale=[math]::Min(($w-70)/(2*$range),($h-54)/(2*$range));$cx=$w/2;$cy=$h/2
+ $script:ringMapPixelsPerMeter=$scale;$script:ringMapCenterX=$cx;$script:ringMapCenterY=$cy
+ $gridPen=[Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#D8E0EC'),1)
+ $axisPen=[Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#64748B'),2)
+ for($m=-1.0;$m-le1.0;$m+=0.25){$px=$cx+$m*$scale;$py=$cy-$m*$scale;$g.DrawLine($gridPen,$px,18,$px,$h-18);$g.DrawLine($gridPen,18,$py,$w-18,$py)}
+ $g.DrawLine($axisPen,18,$cy,$w-18,$cy);$g.DrawLine($axisPen,$cx,18,$cx,$h-18)
+ $originBrush=[Drawing.SolidBrush]::new([Drawing.ColorTranslator]::FromHtml('#17233C'))
+ $g.FillEllipse($originBrush,$cx-6,$cy-6,12,12)
+ $small=[Drawing.Font]::new('Segoe UI Semibold',8.5)
+ $g.DrawString('DeskOrigin',$small,$originBrush,$cx+8,$cy+6)
+ $g.DrawString('+X RIGHT',$small,$originBrush,$w-86,$cy+5)
+ $g.DrawString('+Z FORWARD',$small,$originBrush,$cx+8,2)
+ $colors=@{A='#2563EB';B='#F59E0B';C='#DB2777'}
+ foreach($id in @('A','B','C')){
+  $v=$script:ringLayouts[$id];$px=$cx+$v.X*$scale;$py=$cy-$v.Z*$scale
+  $rx=[math]::Max(5,$v.RadiusX*$scale);$rz=[math]::Max(5,$v.RadiusZ*$scale)
+  $color=[Drawing.ColorTranslator]::FromHtml($colors[$id])
+  $fill=[Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(45,$color))
+  $penWidth=if($id-eq$script:selectedRingPattern){4}else{2}
+  $pen=[Drawing.Pen]::new($color,$penWidth)
+  $g.FillEllipse($fill,$px-$rx,$py-$rz,2*$rx,2*$rz)
+  $g.DrawEllipse($pen,$px-$rx,$py-$rz,2*$rx,2*$rz)
+  $labelBrush=[Drawing.SolidBrush]::new($color)
+  $g.DrawString("$id  X=$($v.X.ToString('0.00'))  Z=$($v.Z.ToString('0.00'))`nR=$($v.RadiusX.ToString('0.00'))m",$small,$labelBrush,$px-$rx,$py-$rz-31)
+  $fill.Dispose();$pen.Dispose();$labelBrush.Dispose()
+ }
+ $gridPen.Dispose();$axisPen.Dispose();$originBrush.Dispose();$small.Dispose()
+}
 function HitTestRingMap($x,$y){foreach($id in @('C','B','A')){$v=$script:ringLayouts[$id];$px=$script:ringMapCenterX+$v.X*$script:ringMapPixelsPerMeter;$py=$script:ringMapCenterY-$v.Z*$script:ringMapPixelsPerMeter;$rx=[math]::Max(14,$v.RadiusX*$script:ringMapPixelsPerMeter+8);$rz=[math]::Max(14,$v.RadiusZ*$script:ringMapPixelsPerMeter+8);$dx=($x-$px)/$rx;$dy=($y-$py)/$rz;if($dx*$dx+$dy*$dy-le1){return $id}};$null}
 function SaveLauncherState{
  try{
