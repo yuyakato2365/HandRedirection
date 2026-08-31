@@ -98,6 +98,11 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     public bool syncCommittedRatioFromWarpedScale = true;
     [Tooltip("Keep the hand mapping ratio fixed while an object is being resized, then apply the final scale when resizing ends.")]
     public bool freezeCommittedRatioWhileDeforming = true;
+    [Min(0f)]
+    [Tooltip("Multiplier for the hand-mapping scale change relative to the object's scale change. 1 matches the object, 2 doubles the enlargement/reduction amount, and 0 disables scale-change mapping.")]
+    public float handMappingScaleChangeMultiplier = 1f;
+    public bool persistHandMappingScaleChangeMultiplier = true;
+    public string handMappingScaleChangeMultiplierPlayerPrefsKey = "HandRedirection.HandMappingScaleChangeMultiplier";
     public float nearRadius = 0.12f;
     public float farRadius = 0.30f;
 
@@ -109,6 +114,9 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     [Tooltip("Far radius used for objects outside the HMD forward gaze.")]
     public float nonGazedFarRadius = 0.10f;
     public float gazeMaxDistance = 10f;
+    [Header("Gaze Target Radius Runtime Setting")]
+    public bool persistGazeTargetRadius = true;
+    public string gazeTargetRadiusPlayerPrefsKey = "HandRedirection.GazeTargetRadius";
     [Tooltip("Local pitch offset for the HMD gaze direction. Positive values tilt the gaze downward.")]
     public float gazePitchDownDegrees = 0f;
     [Tooltip("Seconds used to blend between gazed and non-gazed radii. Set to zero for an immediate switch.")]
@@ -181,8 +189,91 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
 
     void Awake()
     {
+        LoadHandMappingScaleChangeMultiplierFromPrefs();
+        LoadGazeTargetRadiusFromPrefs();
         InitializeAllEntries();
         RegisterDeformCallbacks();
+    }
+
+    public void SetHandMappingScaleChangeMultiplier(float value, bool save = true)
+    {
+        handMappingScaleChangeMultiplier = Mathf.Max(0f, value);
+        if (!save || !persistHandMappingScaleChangeMultiplier || string.IsNullOrWhiteSpace(handMappingScaleChangeMultiplierPlayerPrefsKey))
+            return;
+
+        PlayerPrefs.SetFloat(handMappingScaleChangeMultiplierPlayerPrefsKey, handMappingScaleChangeMultiplier);
+        PlayerPrefs.Save();
+    }
+
+    public void LoadHandMappingScaleChangeMultiplierFromPrefs()
+    {
+        if (!persistHandMappingScaleChangeMultiplier || string.IsNullOrWhiteSpace(handMappingScaleChangeMultiplierPlayerPrefsKey))
+            return;
+
+        handMappingScaleChangeMultiplier = Mathf.Max(
+            0f,
+            PlayerPrefs.GetFloat(handMappingScaleChangeMultiplierPlayerPrefsKey, handMappingScaleChangeMultiplier));
+    }
+
+    public bool TryGetGazeTargetRadius(string objectId, out float radius)
+    {
+        List<WarpObjectEntry> active = EnumerateActiveEntries();
+        for (int i = 0; i < active.Count; i++)
+        {
+            WarpObjectEntry entry = active[i];
+            if (entry != null && string.Equals(entry.name, objectId, StringComparison.OrdinalIgnoreCase))
+            {
+                radius = Mathf.Max(0f, entry.gazeTargetRadius);
+                return true;
+            }
+        }
+        radius = 0f;
+        return false;
+    }
+
+    public bool SetGazeTargetRadius(string objectId, float radius, bool save = true)
+    {
+        radius = Mathf.Max(0f, radius);
+        List<WarpObjectEntry> active = EnumerateActiveEntries();
+        for (int i = 0; i < active.Count; i++)
+        {
+            WarpObjectEntry entry = active[i];
+            if (entry == null || !string.Equals(entry.name, objectId, StringComparison.OrdinalIgnoreCase))
+                continue;
+            entry.overrideGazeTargetRadius = true;
+            entry.gazeTargetRadius = radius;
+
+            if (save && persistGazeTargetRadius && !string.IsNullOrWhiteSpace(gazeTargetRadiusPlayerPrefsKey))
+            {
+                PlayerPrefs.SetFloat(GetGazeTargetRadiusPrefsKey(objectId), radius);
+                PlayerPrefs.Save();
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    public void LoadGazeTargetRadiusFromPrefs()
+    {
+        if (!persistGazeTargetRadius || string.IsNullOrWhiteSpace(gazeTargetRadiusPlayerPrefsKey))
+            return;
+
+        List<WarpObjectEntry> active = EnumerateActiveEntries();
+        for (int i = 0; i < active.Count; i++)
+        {
+            WarpObjectEntry entry = active[i];
+            if (entry == null || string.IsNullOrWhiteSpace(entry.name))
+                continue;
+            string key = GetGazeTargetRadiusPrefsKey(entry.name);
+            if (PlayerPrefs.HasKey(key))
+                SetGazeTargetRadius(entry.name, PlayerPrefs.GetFloat(key), false);
+        }
+    }
+
+    string GetGazeTargetRadiusPrefsKey(string objectId)
+    {
+        return $"{gazeTargetRadiusPlayerPrefsKey}.{objectId}";
     }
 
     void OnDestroy()
@@ -1257,15 +1348,24 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         if (!TryGetRealPose(entry, out Vector3 objectPosW, out Quaternion objectRotW))
             return false;
 
-        Vector3 ratio = entry.committedRatio;
+        Vector3 objectRatio = entry.committedRatio;
+        Vector3 mappingRatio = ApplyHandMappingScaleChangeMultiplier(objectRatio);
         Vector3 deltaRealW = pointW - objectPosW;
         Vector3 deltaRealLocal = Quaternion.Inverse(objectRotW) * deltaRealW;
-        Vector3 deltaWarpLocal = ApplyPiecewiseClampDeform(deltaRealLocal, entry.baseHalfExtents, ratio);
+        Vector3 deltaWarpLocal = ApplyPiecewiseClampDeform(deltaRealLocal, entry.baseHalfExtents, mappingRatio);
         mappedPointW = entry.warpedObject.position + (entry.warpedObject.rotation * deltaWarpLocal);
 
-        float d = ComputeBlendDistance(deltaRealLocal, entry.baseHalfExtents, ratio);
+        // The blend shell continues to follow the physical/visual object size;
+        // only the redirected hand's scale-change response is multiplied.
+        float d = ComputeBlendDistance(deltaRealLocal, entry.baseHalfExtents, objectRatio);
         beta = ComputeObjectBlend(d, entry);
         return true;
+    }
+
+    Vector3 ApplyHandMappingScaleChangeMultiplier(Vector3 objectRatio)
+    {
+        float multiplier = Mathf.Max(0f, handMappingScaleChangeMultiplier);
+        return Vector3.one + ((objectRatio - Vector3.one) * multiplier);
     }
 
     void UpdateHand(Transform original, Transform redirector, Transform indexTipPoint, ref int lastSelectedIndex)

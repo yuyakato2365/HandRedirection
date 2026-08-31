@@ -395,10 +395,20 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
 
         fader.anchorPlacer = FindFirstObjectByType<ManualSpatialAnchorPlacer>();
         fader.deskBinder = FindFirstObjectByType<SpatialAnchorToDeskOriginBinder>();
+        if (fader.deskBinder != null)
+            fader.deskBinder.UseExternalPlacementTransparencyController();
         fader.placementAlpha = 0.28f;
         fader.autoFindFadeTargets = true;
         fader.includeInactiveRenderers = false;
         fader.RefreshTargetRenderers();
+
+        var slider = fader.GetComponent<AnchorPlacementOpacitySlider>();
+        if (slider == null)
+            slider = fader.gameObject.AddComponent<AnchorPlacementOpacitySlider>();
+
+        slider.anchorPlacer = fader.anchorPlacer;
+        slider.deskBinder = fader.deskBinder;
+        slider.sceneFader = fader;
     }
 
     private static IEnumerator LogState()

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GaussianSplatting.Runtime;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -30,6 +31,8 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
 
     private readonly List<MaterialState> materialStates = new List<MaterialState>();
     private readonly List<Renderer> targetRenderers = new List<Renderer>();
+    private readonly List<GaussianSplatRenderer> targetGaussianSplats = new List<GaussianSplatRenderer>();
+    private readonly List<GaussianOpacityState> gaussianOpacityStates = new List<GaussianOpacityState>();
     private bool fadeApplied;
 
     private struct MaterialState
@@ -52,6 +55,12 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         public bool hasZWrite;
         public float zWrite;
         public int renderQueue;
+    }
+
+    private struct GaussianOpacityState
+    {
+        public GaussianSplatRenderer renderer;
+        public float opacityScale;
     }
 
     private void OnEnable()
@@ -98,13 +107,23 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
 
     private void ApplyFade()
     {
-        if (fadeApplied)
-            return;
-
         if (targetRenderers.Count == 0)
             RefreshTargetRenderers();
 
         float alpha = Mathf.Clamp01(placementAlpha);
+        for (int i = 0; i < targetGaussianSplats.Count; i++)
+        {
+            GaussianSplatRenderer splat = targetGaussianSplats[i];
+            if (splat == null || ContainsGaussianState(splat))
+                continue;
+
+            gaussianOpacityStates.Add(new GaussianOpacityState
+            {
+                renderer = splat,
+                opacityScale = splat.m_OpacityScale
+            });
+        }
+
         for (int i = 0; i < targetRenderers.Count; i++)
         {
             Renderer renderer = targetRenderers[i];
@@ -119,16 +138,59 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
                     continue;
 
                 materialStates.Add(CaptureMaterialState(material));
-                ForceMaterialTransparent(material, alpha);
             }
         }
 
-        fadeApplied = materialStates.Count > 0;
+        fadeApplied = materialStates.Count > 0 || gaussianOpacityStates.Count > 0;
+        ApplyCurrentAlpha(alpha);
+    }
+
+    public void SetPlacementAlpha(float alpha)
+    {
+        placementAlpha = Mathf.Clamp(alpha, 0.05f, 1f);
+        if (fadeApplied)
+            ApplyCurrentAlpha(placementAlpha);
+    }
+
+    private void ApplyCurrentAlpha(float multiplier)
+    {
+        multiplier = Mathf.Clamp01(multiplier);
+        for (int i = 0; i < gaussianOpacityStates.Count; i++)
+        {
+            GaussianOpacityState state = gaussianOpacityStates[i];
+            if (state.renderer != null)
+                state.renderer.m_OpacityScale = state.opacityScale * multiplier;
+        }
+
+        for (int i = 0; i < materialStates.Count; i++)
+        {
+            MaterialState state = materialStates[i];
+            Material material = state.material;
+            if (material == null)
+                continue;
+
+            if (state.hasColor)
+            {
+                Color color = state.color;
+                color.a *= multiplier;
+                material.SetColor("_Color", color);
+            }
+
+            if (state.hasBaseColor)
+            {
+                Color color = state.baseColor;
+                color.a *= multiplier;
+                material.SetColor("_BaseColor", color);
+            }
+
+            ForceMaterialTransparent(material);
+        }
     }
 
     public void RefreshTargetRenderers()
     {
         targetRenderers.Clear();
+        targetGaussianSplats.Clear();
 
         HashSet<Transform> roots = new HashSet<Transform>();
         if (fadeRoots != null)
@@ -218,6 +280,14 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
             if (renderer != null && !targetRenderers.Contains(renderer))
                 targetRenderers.Add(renderer);
         }
+
+        GaussianSplatRenderer[] splats = root.GetComponentsInChildren<GaussianSplatRenderer>(includeInactiveRenderers);
+        for (int i = 0; i < splats.Length; i++)
+        {
+            GaussianSplatRenderer splat = splats[i];
+            if (splat != null && !targetGaussianSplats.Contains(splat))
+                targetGaussianSplats.Add(splat);
+        }
     }
 
     private void RestoreFade()
@@ -228,7 +298,15 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         for (int i = 0; i < materialStates.Count; i++)
             RestoreMaterialState(materialStates[i]);
 
+        for (int i = 0; i < gaussianOpacityStates.Count; i++)
+        {
+            GaussianOpacityState state = gaussianOpacityStates[i];
+            if (state.renderer != null)
+                state.renderer.m_OpacityScale = state.opacityScale;
+        }
+
         materialStates.Clear();
+        gaussianOpacityStates.Clear();
         fadeApplied = false;
     }
 
@@ -268,6 +346,17 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         return false;
     }
 
+    private bool ContainsGaussianState(GaussianSplatRenderer renderer)
+    {
+        for (int i = 0; i < gaussianOpacityStates.Count; i++)
+        {
+            if (gaussianOpacityStates[i].renderer == renderer)
+                return true;
+        }
+
+        return false;
+    }
+
     private static MaterialState CaptureMaterialState(Material material)
     {
         return new MaterialState
@@ -293,22 +382,8 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         };
     }
 
-    private static void ForceMaterialTransparent(Material material, float alpha)
+    private static void ForceMaterialTransparent(Material material)
     {
-        if (material.HasProperty("_Color"))
-        {
-            Color color = material.GetColor("_Color");
-            color.a = alpha;
-            material.SetColor("_Color", color);
-        }
-
-        if (material.HasProperty("_BaseColor"))
-        {
-            Color color = material.GetColor("_BaseColor");
-            color.a = alpha;
-            material.SetColor("_BaseColor", color);
-        }
-
         if (material.HasProperty("_Mode"))
             material.SetFloat("_Mode", 3f);
         if (material.HasProperty("_Surface"))
@@ -320,7 +395,12 @@ public sealed class AnchorPlacementSceneFader : MonoBehaviour
         if (material.HasProperty("_DstBlend"))
             material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
         if (material.HasProperty("_ZWrite"))
-            material.SetFloat("_ZWrite", 0f);
+        {
+            // Keep the nearest desk/room surface in the depth buffer. Disabling
+            // depth writes on a complete desk mesh lets its far/inside faces
+            // blend over the tabletop and makes the surface look inverted.
+            material.SetFloat("_ZWrite", 1f);
+        }
 
         material.EnableKeyword("_ALPHABLEND_ON");
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");

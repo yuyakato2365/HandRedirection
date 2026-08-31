@@ -59,6 +59,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [Header("Offset From Anchor To Desk Origin")]
     public Vector3 localPositionOffset = Vector3.zero;
     public Vector3 localEulerOffset = Vector3.zero;
+    [Tooltip("Keep the confirmed DeskOrigin at the Spatial Anchor position. The anchor itself is created at the approved 5 cm-below-hand placement pose, so no separate tracker/desk offset is needed.")]
+    public bool forceZeroConfirmedPositionOffset = true;
     public bool persistOffsetInPlayerPrefs = true;
     public string savedOffsetPlayerPrefsKey = "HandRedirection.DeskAnchorOffset";
 
@@ -117,6 +119,8 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     [Header("Placement Preview")]
     [Tooltip("While anchor placement is active, drive DeskOrigin from the moving candidate anchor pose before the persistent anchor is created.")]
     public bool previewDeskDuringAnchorPlacement = true;
+    [Tooltip("Keep DeskOrigin's local up axis aligned with Unity world up while placing the anchor. Yaw adjustment remains available, but pitch/roll cannot tilt the desk plane.")]
+    public bool keepDeskHorizontalDuringAnchorPlacement = true;
     [Tooltip("Fade the desk visuals during anchor/desk adjustment so it is clear the pose is temporary.")]
     public bool makeDeskTransparentWhileAdjusting = false;
     [Range(0.05f, 1f)] public float adjustingDeskAlpha = 0.35f;
@@ -142,6 +146,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     public bool HasAlignmentState { get; private set; }
     public bool IsAlignmentConfirmed { get; private set; }
     public bool IsAdjustingAlignment => HasAlignmentState && !IsAlignmentConfirmed;
+    public bool IsExternalLeftRotationInputSuppressed => externalLeftRotationInputSuppressed;
     public float CurrentYawAdjustmentDegrees => yawAdjustmentDegrees;
 
     public event Action AlignmentStarted;
@@ -174,6 +179,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private float redirectionOriginYawAtLeftPinchStart;
     private bool wasLeftRedirectionOriginPinching;
     private bool wasLeftFineRedirectionOriginPinching;
+    private bool externalLeftRotationInputSuppressed;
     private GameObject redirectionOriginMarkerInstance;
     private Transform redirectionOriginMarkerCenter;
     private RuntimeCoordinateAxes deskOriginCoordinateAxes;
@@ -241,6 +247,7 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     private void Start()
     {
         SubscribeAnchorRefresh();
+        AnchorPlacementOpacitySlider.EnsureForScene(anchorPlacer, this);
 
         if (applyOnStart)
             ApplyNow();
@@ -290,14 +297,21 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
     private void UpdateOriginCoordinateAxes()
     {
-        if (!Application.isPlaying || !showOriginCoordinateAxes)
+        bool forcePlacementDeskAxis = anchorPlacer != null &&
+                                      (anchorPlacer.IsPlacementMode || usingPlacementCandidateAnchor);
+        if (!Application.isPlaying || (!showOriginCoordinateAxes && !forcePlacementDeskAxis))
         {
             SetOriginCoordinateAxesActive(false);
             return;
         }
 
+        // Keep DeskOrigin's axes visible even while the Spatial Anchor preview
+        // is shown. The anchor preview and DeskOrigin use the same approved pose.
         UpdateOriginCoordinateAxis(ref deskOriginCoordinateAxes, "DeskOriginAxes", deskOrigin);
-        UpdateOriginCoordinateAxis(ref redirectionOriginCoordinateAxes, "RedirectOriginAxes", redirectionOrigin);
+        if (showOriginCoordinateAxes)
+            UpdateOriginCoordinateAxis(ref redirectionOriginCoordinateAxes, "RedirectOriginAxes", redirectionOrigin);
+        else if (redirectionOriginCoordinateAxes != null)
+            redirectionOriginCoordinateAxes.gameObject.SetActive(false);
     }
 
     private void UpdateOriginCoordinateAxis(ref RuntimeCoordinateAxes axes, string objectName, Transform source)
@@ -320,7 +334,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         }
 
         axes.gameObject.SetActive(true);
-        axes.transform.SetPositionAndRotation(source.position, source.rotation);
+        if (source == deskOrigin && anchorPlacer != null &&
+            (anchorPlacer.IsPlacementMode || usingPlacementCandidateAnchor))
+        {
+            Pose visualPose = anchorPlacer.PlacementVisualPose;
+            axes.transform.SetPositionAndRotation(visualPose.position, visualPose.rotation);
+        }
+        else
+        {
+            axes.transform.SetPositionAndRotation(source.position, source.rotation);
+        }
     }
 
     private void SetOriginCoordinateAxesActive(bool active)
@@ -342,22 +365,28 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             return;
         }
 
-        // During live placement the candidate already represents DeskOrigin's
-        // requested world position (directly below the right hand). Do not add
-        // a previously saved Anchor -> DeskOrigin offset to that preview.
+        // During live placement use the exact pose that will become the Spatial
+        // Anchor. The 5 cm hand-to-placement distance is baked into the anchor
+        // pose, not stored as an Anchor -> DeskOrigin/tracker offset.
         bool usingLivePlacementPose = previewDeskDuringAnchorPlacement &&
                                       anchorPlacer != null &&
-                                      anchorPlacer.IsPlacementMode;
+                                      (anchorPlacer.IsPlacementMode || usingPlacementCandidateAnchor);
+        Vector3 confirmedPositionOffset = forceZeroConfirmedPositionOffset
+            ? Vector3.zero
+            : localPositionOffset;
         Vector3 targetPos = usingLivePlacementPose
-            ? anchorPosition
-            : anchorPosition + (anchorRotation * localPositionOffset);
+            ? anchorPlacer.PlacementVisualPose.position
+            : anchorPosition + (anchorRotation * confirmedPositionOffset);
         Quaternion targetRot = ResolveTargetRotation(anchorRotation);
         if (!usingLivePlacementPose &&
             TryGetLatchedAnchorPose(out Vector3 latchedPosition, out Quaternion latchedRotation))
         {
-            targetPos = latchedPosition + (latchedRotation * localPositionOffset);
+            targetPos = latchedPosition + (latchedRotation * confirmedPositionOffset);
             targetRot = ResolveTargetRotation(latchedRotation);
         }
+
+        if (keepDeskHorizontalDuringAnchorPlacement && usingPlacementCandidateAnchor)
+            targetRot = MakeHorizontalRotation(targetRot, anchorRotation);
 
         ApplyPose(deskOrigin, targetPos, targetRot);
         ApplyPose(trackerDeskTransform, targetPos, targetRot);
@@ -475,9 +504,20 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (!HasAlignmentState)
             return;
 
+        // End placement preview without introducing an Anchor -> DeskOrigin
+        // offset. ManualSpatialAnchorPlacer creates the anchor at the approved
+        // preview pose, so the confirmed DeskOrigin stays in the same place.
+        bool confirmingPlacementPreview = usingPlacementCandidateAnchor;
+        if (confirmingPlacementPreview)
+            usingPlacementCandidateAnchor = false;
+        if (forceZeroConfirmedPositionOffset)
+            localPositionOffset = Vector3.zero;
+
         IsAlignmentConfirmed = true;
         ApplyNow();
         CaptureCurrentDeskAsOffset();
+        if (forceZeroConfirmedPositionOffset)
+            localPositionOffset = Vector3.zero;
         SaveCurrentOffsetToPrefs();
         if (TryGetAnchorPoseForDesk(out Vector3 confirmedAnchorPosition, out Quaternion confirmedAnchorRotation))
             CaptureLatchedAnchorPose(confirmedAnchorPosition, confirmedAnchorRotation, "ConfirmManualRotationAlignment");
@@ -541,9 +581,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (!TryGetAnchorPoseForDesk(out Vector3 anchorPosition, out Quaternion anchorRotation) || target == null)
             return;
 
-        localPositionOffset = Quaternion.Inverse(anchorRotation) * (target.position - anchorPosition);
+        Vector3 capturedPositionOffset = Quaternion.Inverse(anchorRotation) * (target.position - anchorPosition);
+        localPositionOffset = forceZeroConfirmedPositionOffset
+            ? Vector3.zero
+            : capturedPositionOffset;
         localEulerOffset = (Quaternion.Inverse(anchorRotation) * target.rotation).eulerAngles;
-        LogAlignmentEvent($"CaptureCurrentDeskAsOffset anchorPos={anchorPosition} anchorRot={FormatRotation(anchorRotation)} target={FormatTransform(target)} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
+        LogAlignmentEvent($"CaptureCurrentDeskAsOffset anchorPos={anchorPosition} anchorRot={FormatRotation(anchorRotation)} target={FormatTransform(target)} capturedOffsetPos={capturedPositionOffset} savedOffsetPos={localPositionOffset} savedOffsetEuler={localEulerOffset}");
     }
 
     public bool LoadSavedOffsetFromPrefs()
@@ -560,6 +603,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             SavedDeskAnchorOffset saved = JsonUtility.FromJson<SavedDeskAnchorOffset>(json);
             localPositionOffset = saved.localPositionOffset;
             localEulerOffset = saved.localEulerOffset;
+            if (forceZeroConfirmedPositionOffset && localPositionOffset != Vector3.zero)
+            {
+                localPositionOffset = Vector3.zero;
+                SaveCurrentOffsetToPrefs();
+            }
             LogAlignmentEvent($"Loaded saved desk offset pos={localPositionOffset} euler={localEulerOffset}");
             return true;
         }
@@ -574,6 +622,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
     {
         if (!persistOffsetInPlayerPrefs || string.IsNullOrEmpty(savedOffsetPlayerPrefsKey))
             return;
+
+        if (forceZeroConfirmedPositionOffset)
+            localPositionOffset = Vector3.zero;
 
         SavedDeskAnchorOffset saved = new SavedDeskAnchorOffset
         {
@@ -696,7 +747,9 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
             anchorPlacer != null &&
             (usingPlacementCandidateAnchor || anchorPlacer.IsPlacementMode || (HasAlignmentState && !IsAlignmentConfirmed && anchorPlacer.IsCreatingAnchor && anchorPlacer.CurrentAnchorTransform == null)))
         {
-            Pose candidatePose = anchorPlacer.CandidatePose;
+            // DeskOrigin uses the exact pose that will be used to create the
+            // Spatial Anchor, including the setup-only hand separation.
+            Pose candidatePose = anchorPlacer.PlacementPoseForDesk;
             position = candidatePose.position;
             rotation = candidatePose.rotation;
             return true;
@@ -1046,6 +1099,12 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (!enableHandRotationAlignment || !IsAdjustingAlignment)
             return;
 
+        if (externalLeftRotationInputSuppressed)
+        {
+            ResetLeftRotationPinchTracking();
+            return;
+        }
+
         AutoAssignHands();
         AutoAssignPinchProviders();
         AutoAssignLeftWrist();
@@ -1170,6 +1229,13 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (!enableLeftHandRedirectionOriginRotation)
             return;
 
+        if (externalLeftRotationInputSuppressed)
+        {
+            wasLeftRedirectionOriginPinching = false;
+            wasLeftFineRedirectionOriginPinching = false;
+            return;
+        }
+
         AutoAssignPinchProviders();
         AutoAssignHands();
         AutoAssignLeftWrist();
@@ -1216,6 +1282,24 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
 
         wasLeftRedirectionOriginPinching = leftPinching;
         wasLeftFineRedirectionOriginPinching = leftFinePinching;
+    }
+
+    public void SetExternalLeftRotationInputSuppressed(bool suppressed)
+    {
+        if (externalLeftRotationInputSuppressed == suppressed)
+            return;
+
+        externalLeftRotationInputSuppressed = suppressed;
+        ResetLeftRotationPinchTracking();
+        wasLeftRedirectionOriginPinching = false;
+        wasLeftFineRedirectionOriginPinching = false;
+        LogAlignmentEvent($"External left rotation input suppressed={suppressed}");
+    }
+
+    private void ResetLeftRotationPinchTracking()
+    {
+        wasLeftRotationPinching = false;
+        wasLeftFineRotationPinching = false;
     }
 
     [ContextMenu("Anchor Binder/Sync Redirection Origin With Desk")]
@@ -1759,6 +1843,16 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         return applyFullLeftHandRotation ? handRotationAdjustment * adjustedRotation : adjustedRotation;
     }
 
+    private static Quaternion MakeHorizontalRotation(Quaternion rotation, Quaternion fallbackRotation)
+    {
+        Vector3 forward = Vector3.ProjectOnPlane(rotation * Vector3.forward, Vector3.up);
+        if (forward.sqrMagnitude < 1e-6f)
+            forward = Vector3.ProjectOnPlane(fallbackRotation * Vector3.forward, Vector3.up);
+        if (forward.sqrMagnitude < 1e-6f)
+            forward = Vector3.forward;
+        return Quaternion.LookRotation(forward.normalized, Vector3.up);
+    }
+
     private void CaptureLatchedAnchorPose(Transform anchor, string reason)
     {
         if (!useLatchedAnchorPoseAfterConfirmation || anchor == null)
@@ -1813,6 +1907,26 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         }
 
         SetDeskTransparency(IsAdjustingAlignment);
+    }
+
+    public void SetPlacementOpacityMultiplier(float multiplier)
+    {
+        float value = Mathf.Clamp(multiplier, 0.05f, 1f);
+        adjustingDeskAlpha = value;
+        adjustingGaussianSplatOpacityMultiplier = value;
+
+        if (!deskTransparencyApplied)
+            return;
+
+        RestoreDeskTransparency();
+        ApplyDeskTransparency();
+    }
+
+    public void UseExternalPlacementTransparencyController()
+    {
+        RestoreDeskTransparency();
+        makeDeskTransparentWhileAdjusting = false;
+        fadeGaussianSplatsWhileAdjusting = false;
     }
 
     private void ApplyDeskTransparency()
@@ -1986,7 +2100,11 @@ public class SpatialAnchorToDeskOriginBinder : MonoBehaviour
         if (material.HasProperty("_DstBlend"))
             material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
         if (material.HasProperty("_ZWrite"))
-            material.SetFloat("_ZWrite", 0f);
+        {
+            // Preserve front-surface depth while fading a full desk mesh so
+            // back/inside faces cannot render over the tabletop.
+            material.SetFloat("_ZWrite", 1f);
+        }
 
         material.EnableKeyword("_ALPHABLEND_ON");
         material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");

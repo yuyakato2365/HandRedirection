@@ -6,6 +6,8 @@ $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $cfg=Get-Content (Join-Path $PSScriptRoot 'launcher.config.json') -Raw|ConvertFrom-Json
 $pidFile=Join-Path $root 'Temp\tracker_bridge4.pid'; $logDir=Join-Path $root 'Logs\TrackerBridge'
 $editorCommandFile=Join-Path $root 'Temp\hand_redirection_editor_command.txt'
+$launcherStateFile=Join-Path $root 'UserSettings\HandRedirectionLauncherState.json'
+$script:selectedRingPattern='A'
 $cmdPort=9101; $statusPort=9102; $statusClient=$null
 $bg=[Drawing.ColorTranslator]::FromHtml('#F3F6FB');$white=[Drawing.Color]::White
 $navy=[Drawing.ColorTranslator]::FromHtml('#17233C');$ink=[Drawing.ColorTranslator]::FromHtml('#1F2937')
@@ -14,20 +16,31 @@ $green=[Drawing.ColorTranslator]::FromHtml('#16845B');$red=[Drawing.ColorTransla
 $line=[Drawing.ColorTranslator]::FromHtml('#D8E0EC');$font=[Drawing.Font]::new('Segoe UI',9.5)
 function ResolveLauncherPath($p){if([IO.Path]::IsPathRooted($p)){return $p};[IO.Path]::GetFullPath((Join-Path $root $p))}
 $bridgeDir=ResolveLauncherPath $cfg.trackerBridgeDirectory;$python=ResolveLauncherPath $cfg.trackerBridgePython;$script=ResolveLauncherPath $cfg.trackerBridgeScript;$bridgeCfg=ResolveLauncherPath $cfg.trackerBridgeConfig
+$bridgeAckPort=9001
+if(Test-Path -LiteralPath $bridgeCfg){try{$bridgeRuntimeCfg=Get-Content -LiteralPath $bridgeCfg -Raw|ConvertFrom-Json;if($null-ne$bridgeRuntimeCfg.ackPort){$bridgeAckPort=[int]$bridgeRuntimeCfg.ackPort}}catch{}}
 function Label($s,$x,$y,$w,$h=24){$c=[Windows.Forms.Label]::new();$c.Text=$s;$c.Location=[Drawing.Point]::new($x,$y);$c.Size=[Drawing.Size]::new($w,$h);$c.Font=$font;$c.ForeColor=$ink;$c.BackColor=[Drawing.Color]::Transparent;$c}
 function Button($s,$x,$y,$w,$h=38,$primary=$false,$danger=$false){$c=[Windows.Forms.Button]::new();$c.Text=$s;$c.Location=[Drawing.Point]::new($x,$y);$c.Size=[Drawing.Size]::new($w,$h);$c.FlatStyle='Flat';$c.Font=[Drawing.Font]::new('Segoe UI Semibold',9.5);$c.Cursor='Hand';if($primary){$c.BackColor=$blue;$c.ForeColor=$white;$c.FlatAppearance.BorderSize=0}else{$c.BackColor=$white;$c.ForeColor=if($danger){$red}else{$ink};$c.FlatAppearance.BorderColor=if($danger){$red}else{$line}};$c}
 function Card($x,$y,$w,$h){$c=[Windows.Forms.Panel]::new();$c.Location=[Drawing.Point]::new($x,$y);$c.Size=[Drawing.Size]::new($w,$h);$c.BackColor=$white;$c.BorderStyle='FixedSingle';$c}
 function Log($s){if($log){$log.AppendText("[$(Get-Date -Format HH:mm:ss)] $s`r`n");$log.SelectionStart=$log.Text.Length;$log.ScrollToCaret()}}
 function Message($s,$bad=$false){$message.Text=$s;$message.ForeColor=if($bad){$red}else{$green}}
 function TargetIp{if($mode.SelectedItem -eq 'Quest Link / Unity Editor'){'127.0.0.1'}else{$ip.Text.Trim()}}
-function BridgeProcess{if(!(Test-Path $pidFile)){return $null};$n=0;$v=(Get-Content $pidFile -Raw -ErrorAction SilentlyContinue).Trim();if(![int]::TryParse($v,[ref]$n)){return $null};Get-Process -Id $n -ErrorAction SilentlyContinue}
+function BridgeProcess{
+ if(Test-Path $pidFile){$n=0;$v=(Get-Content $pidFile -Raw -ErrorAction SilentlyContinue).Trim();if([int]::TryParse($v,[ref]$n)){$p=Get-Process -Id $n -ErrorAction SilentlyContinue;if($p){return $p}}}
+ # Recover an already-running bridge when its PID file was lost. The bridge
+ # exclusively owns the configured UDP ACK port while it is alive.
+ $pattern=('^\s*UDP\s+\S+:{0}\s+\S+\s+(\d+)\s*$' -f $bridgeAckPort)
+ $line=netstat -ano -p udp 2>$null|Where-Object{$_ -match $pattern}|Select-Object -First 1
+ if($line -and $line -match $pattern){$ownerPid=[int]$Matches[1];return Get-Process -Id $ownerPid -ErrorAction SilentlyContinue}
+ return $null
+}
 function StartServices{
  if(!(Get-Process vrserver,vrmonitor -ErrorAction SilentlyContinue)){if(!(Test-Path $cfg.steamVrMonitorPath)){throw 'SteamVR was not found.'};Start-Process $cfg.steamVrMonitorPath}
  if(BridgeProcess){return};foreach($p in @($python,$script,$bridgeCfg)){if(!(Test-Path $p)){throw "Required file not found: $p"}}
  New-Item -ItemType Directory (Split-Path $pidFile) -Force|Out-Null;New-Item -ItemType Directory $logDir -Force|Out-Null;$stamp=Get-Date -Format yyyyMMdd-HHmmss
- $args=@(('"{0}"' -f $script),'--config',('"{0}"' -f $bridgeCfg),'--quest-ip',(TargetIp),'--wait-for-openvr','60')
+ $args=@(('"{0}"' -f $script),'--config',('"{0}"' -f $bridgeCfg),'--quest-ip',(TargetIp),'--wait-for-openvr','60','--pid-file',('"{0}"' -f $pidFile))
  $p=Start-Process $python -ArgumentList $args -WorkingDirectory $bridgeDir -RedirectStandardOutput (Join-Path $logDir "tracker-$stamp.log") -RedirectStandardError (Join-Path $logDir "tracker-$stamp.error.log") -WindowStyle Hidden -PassThru
- Set-Content $pidFile $p.Id -Encoding ascii
+ for($i=0;$i-lt20 -and !(BridgeProcess);$i++){Start-Sleep -Milliseconds 100;if($p.HasExited){throw "Tracker Bridge failed to start. Check Logs\TrackerBridge\tracker-$stamp.error.log"}}
+ if(!(BridgeProcess)){throw 'Tracker Bridge started but did not publish its process ID.'}
 }
 function StopBridge{$p=BridgeProcess;if($p){Stop-Process $p.Id};if(Test-Path $pidFile){Remove-Item $pidFile -Force};Log 'Tracker Bridge stopped.'}
 function UnityEditorCommand($command){
@@ -39,15 +52,61 @@ function UnityEditorCommand($command){
 function Send($s){try{$hostName=TargetIp;if([string]::IsNullOrWhiteSpace($hostName)){throw 'Quest IP is empty.'};$u=[Net.Sockets.UdpClient]::new();$b=[Text.Encoding]::UTF8.GetBytes($s);[void]$u.Send($b,$b.Length,$hostName,$cmdPort);$u.Close();Log "Sent: $s"}catch{Message $_.Exception.Message $true;Log "Send failed: $($_.Exception.Message)"}}
 function Status{$a=$null-ne(Get-Process vrserver,vrmonitor -ErrorAction SilentlyContinue);$b=$null-ne(BridgeProcess);$steam.Text=if($a){'[ON] SteamVR  RUNNING'}else{'[--] SteamVR  STOPPED'};$steam.ForeColor=if($a){$green}else{$muted};$bridge.Text=if($b){'[ON] Tracker Bridge  RUNNING'}else{'[--] Tracker Bridge  STOPPED'};$bridge.ForeColor=if($b){$green}else{$muted}}
 function OffsetStatus($s){$p=$s -split '\s+';if($p.Count -ne 8 -or $p[0] -ne 'TRACKER_OFFSET'){return};foreach($r in $grid.Rows){if([int]$r.Cells[0].Value -eq [int]$p[1]){for($i=0;$i -lt 6;$i++){$r.Cells[$i+2].Value=$p[$i+2]};$r.DefaultCellStyle.BackColor=[Drawing.ColorTranslator]::FromHtml('#ECFDF5')}}}
-function Poll{if(!$script:statusClient){return};try{while($script:statusClient.Available-gt0){$e=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$s=[Text.Encoding]::UTF8.GetString($script:statusClient.Receive([ref]$e)).Trim();$unity.Text="Unity: $s";$unity.ForeColor=if($s.StartsWith('ERROR')){$red}else{$green};OffsetStatus $s;Log "Received: $s"}}catch [Net.Sockets.SocketException]{}catch{Log $_.Exception.Message}}
+function GroupOffsetStatus($s){$p=$s -split '\s+';if($p.Count -ne 4 -or $p[0] -ne 'TRACKER_GROUP_OFFSET'){return};$groupX.Text=$p[1];$groupY.Text=$p[2];$groupZ.Text=$p[3];$groupState.Text='Loaded and saved in Unity';$groupState.ForeColor=$green}
+function HandScaleStatus($s){$p=$s -split '\s+';if($p.Count -ne 2 -or $p[0] -ne 'HAND_MAPPING_SCALE_MULTIPLIER'){return};$handScale.Text=$p[1];$handScaleState.Text='Loaded and saved in Unity';$handScaleState.ForeColor=$green}
+function GazeRadiusStatus($s){$p=$s -split '\s+';if($p.Count -ne 3 -or $p[0] -ne 'GAZE_TARGET_RADIUS'){return};foreach($r in $gazeGrid.Rows){if([string]$r.Cells[0].Value -eq $p[1]){$r.Cells[1].Value=$p[2];$r.DefaultCellStyle.BackColor=[Drawing.ColorTranslator]::FromHtml('#ECFDF5')}};$gazeRadiusState.Text='Loaded and saved in Unity';$gazeRadiusState.ForeColor=$green}
+function DeskScaleStatus($s){$p=$s -split '\s+';if($p.Count -ne 2 -or $p[0] -ne 'DESK_SCALE'){return};$manualDeskScale.Text=$p[1];$deskScaleState.Text='Applied in Unity';$deskScaleState.ForeColor=$green}
+function TargetRingStatus($s){$p=$s -split '\s+';if($p.Count-ne3-or$p[0]-ne'TARGET_RING_PATTERN'){return};if($p[1]-eq'OFF'){$ringPatternDisplay.Text='RING CHALLENGE OFF';$ringPatternDisplay.BackColor=$muted;$ringPatternState.Text='Disabled in Unity';$ringPatternState.ForeColor=$muted;return};$script:selectedRingPattern=$p[1];$ringPatternDisplay.Text="PATTERN $($p[1])";$ringPatternState.Text=if($p[2]-eq'complete'){'Completed'}else{'Active in Unity'};$ringPatternDisplay.BackColor=if($p[2]-eq'complete'){[Drawing.ColorTranslator]::FromHtml('#0891B2')}else{$blue};$ringPatternState.ForeColor=$green}
+function RingSettingsRow($id){foreach($r in $ringSettingsGrid.Rows){if([string]$r.Cells[0].Value-eq[string]$id){return $r}};$null}
+function SelectedRingSettingsRow{if($ringSettingsGrid.SelectedRows.Count-gt0){return $ringSettingsGrid.SelectedRows[0]};$r=RingSettingsRow $script:selectedRingPattern;if($r){return $r};throw 'Select one pattern row first.'}
+function TargetRingSettingsStatus($s){$p=$s -split '\s+';if($p.Count-ne12-or$p[0]-ne'TARGET_RING_SETTINGS'){return};$r=RingSettingsRow $p[1];if(!$r){return};$r.Cells[1].Value=$p[2];for($i=0;$i-lt9;$i++){$r.Cells[$i+2].Value=$p[$i+3]};$r.DefaultCellStyle.BackColor=[Drawing.ColorTranslator]::FromHtml('#ECFDF5');if($script:selectedRingPattern-eq$p[1]){$ringUniformScale.Checked=([math]::Abs([double]$p[3]-[double]$p[4])-lt0.000001-and[math]::Abs([double]$p[3]-[double]$p[5])-lt0.000001)};$ringPatternState.Text='Pattern and target object loaded from Unity';$ringPatternState.ForeColor=$green}
+function TargetRingCompletedStatus($s){$p=$s -split '\s+';if($p.Count-ne2-or$p[0]-ne'TARGET_RING_COMPLETED'){return};$script:selectedRingPattern=$p[1];$ringPatternDisplay.Text="PATTERN $($p[1]) - COMPLETE";$ringPatternDisplay.BackColor=[Drawing.ColorTranslator]::FromHtml('#0891B2');$ringPatternState.Text='Correct size and position';$ringPatternState.ForeColor=$green}
+function Poll{if(!$script:statusClient){return};try{while($script:statusClient.Available-gt0){$e=[Net.IPEndPoint]::new([Net.IPAddress]::Any,0);$s=[Text.Encoding]::UTF8.GetString($script:statusClient.Receive([ref]$e)).Trim();$unity.Text="Unity: $s";$unity.ForeColor=if($s.StartsWith('ERROR')){$red}else{$green};OffsetStatus $s;GroupOffsetStatus $s;HandScaleStatus $s;GazeRadiusStatus $s;DeskScaleStatus $s;TargetRingStatus $s;TargetRingSettingsStatus $s;TargetRingCompletedStatus $s;Log "Received: $s"}}catch [Net.Sockets.SocketException]{}catch{Log $_.Exception.Message}}
 function Row{if($grid.SelectedRows.Count-eq0){throw 'Select one tracker row first.'};$grid.SelectedRows[0]}
+function GazeRow{if($gazeGrid.SelectedRows.Count-eq0){throw 'Select one gaze object row first.'};$gazeGrid.SelectedRows[0]}
 function Num($r,$i){$n=0.0;if(![double]::TryParse([string]$r.Cells[$i].Value,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$n)){throw 'Use numbers such as 0.02 or -5.'};$n.ToString('R',[Globalization.CultureInfo]::InvariantCulture)}
+function TextNum($box){$n=0.0;if(![double]::TryParse($box.Text,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$n)){throw 'Use meters such as 0.05 or -0.02.'};$n.ToString('R',[Globalization.CultureInfo]::InvariantCulture)}
+function SaveLauncherState{
+ try{
+  $trackerRows=@();foreach($r in $grid.Rows){$trackerRows+=@{id=[int]$r.Cells[0].Value;values=@(2..7|ForEach-Object{[string]$r.Cells[$_].Value})}}
+  $gazeRows=@();foreach($r in $gazeGrid.Rows){$gazeRows+=@{id=[string]$r.Cells[0].Value;radius=[string]$r.Cells[1].Value}}
+  $ringRows=@();foreach($r in $ringSettingsGrid.Rows){$ringRows+=@{id=[string]$r.Cells[0].Value;values=@(1..10|ForEach-Object{[string]$r.Cells[$_].Value})}}
+  $state=@{version=6;mode=[string]$mode.SelectedItem;questIp=$ip.Text;groupOffset=@($groupX.Text,$groupY.Text,$groupZ.Text);handMappingScale=$handScale.Text;deskScale=$manualDeskScale.Text;disableDeskScaleBlackout=$disableDeskScaleBlackout.Checked;targetRingPattern=$script:selectedRingPattern;resetSizesOnRingSwitch=$resetSizesOnRingSwitch.Checked;ringUniformScale=$ringUniformScale.Checked;ringPatterns=$ringRows;trackerOffsets=$trackerRows;gazeRadii=$gazeRows}
+  $dir=Split-Path $launcherStateFile;New-Item -ItemType Directory -Path $dir -Force|Out-Null
+  $temporary="$launcherStateFile.tmp";$state|ConvertTo-Json -Depth 6|Set-Content -LiteralPath $temporary -Encoding utf8;Move-Item -LiteralPath $temporary -Destination $launcherStateFile -Force
+ }
+ catch{Log "Could not save launcher settings: $($_.Exception.Message)"}
+}
+function LoadLauncherState{
+ if(!(Test-Path -LiteralPath $launcherStateFile)){return}
+ try{
+  $state=Get-Content -LiteralPath $launcherStateFile -Raw|ConvertFrom-Json
+  if($mode.Items.Contains([string]$state.mode)){$mode.SelectedItem=[string]$state.mode}
+  if($null-ne$state.questIp){$ip.Text=[string]$state.questIp}
+  if($state.groupOffset.Count-ge3){$groupX.Text=[string]$state.groupOffset[0];$groupY.Text=[string]$state.groupOffset[1];$groupZ.Text=[string]$state.groupOffset[2]}
+  if($null-ne$state.handMappingScale){$handScale.Text=[string]$state.handMappingScale}
+  if($null-ne$state.deskScale){$manualDeskScale.Text=[string]$state.deskScale}
+  if($null-ne$state.disableDeskScaleBlackout){$disableDeskScaleBlackout.Checked=[bool]$state.disableDeskScaleBlackout}
+  if($null-ne$state.targetRingPattern){$script:selectedRingPattern=[string]$state.targetRingPattern;$ringPatternDisplay.Text="PATTERN $script:selectedRingPattern"}
+  if($null-ne$state.resetSizesOnRingSwitch){$resetSizesOnRingSwitch.Checked=[bool]$state.resetSizesOnRingSwitch}
+  foreach($saved in $state.ringPatterns){$r=RingSettingsRow $saved.id;if($r){if($saved.values.Count-ge10){for($i=0;$i-lt10;$i++){$r.Cells[$i+1].Value=[string]$saved.values[$i]}}else{for($i=0;$i-lt9-and$i-lt$saved.values.Count;$i++){$r.Cells[$i+2].Value=[string]$saved.values[$i]}}}}
+  if($null-ne$state.ringUniformScale){$ringUniformScale.Checked=[bool]$state.ringUniformScale}
+  foreach($saved in $state.trackerOffsets){foreach($r in $grid.Rows){if([int]$r.Cells[0].Value-eq[int]$saved.id){for($i=0;$i-lt6-and$i-lt$saved.values.Count;$i++){$r.Cells[$i+2].Value=[string]$saved.values[$i]}}}}
+  foreach($saved in $state.gazeRadii){foreach($r in $gazeGrid.Rows){if([string]$r.Cells[0].Value-eq[string]$saved.id){$r.Cells[1].Value=[string]$saved.radius}}}
+  Log 'Restored saved launcher settings.'
+ }
+ catch{Log "Could not load launcher settings: $($_.Exception.Message)"}
+}
 
 $form=[Windows.Forms.Form]::new();$form.Text='Hand Redirection Control Center';$form.Size=[Drawing.Size]::new(980,850);$form.MinimumSize=$form.Size;$form.StartPosition='CenterScreen';$form.BackColor=$bg;$form.Font=$font
 $head=[Windows.Forms.Panel]::new();$head.Dock='Top';$head.Height=82;$head.BackColor=$navy;$form.Controls.Add($head)
 $t=Label 'Hand Redirection Control Center' 24 13 650 36;$t.Font=[Drawing.Font]::new('Segoe UI Semibold',18);$t.ForeColor=$white;$head.Controls.Add($t);$t=Label 'SteamVR / Tracker Bridge / Spatial Anchor / Tracker Offsets' 26 50 650;$t.ForeColor=[Drawing.ColorTranslator]::FromHtml('#C7D2E5');$head.Controls.Add($t)
 $tabs=[Windows.Forms.TabControl]::new();$tabs.Location=[Drawing.Point]::new(20,98);$tabs.Size=[Drawing.Size]::new(924,615);$tabs.Padding=[Drawing.Point]::new(18,8);$form.Controls.Add($tabs)
 $setup=[Windows.Forms.TabPage]::new('  Setup & Anchor  ');$setup.BackColor=$bg;$tabs.TabPages.Add($setup);$offset=[Windows.Forms.TabPage]::new('  Tracker Offsets  ');$offset.BackColor=$bg;$tabs.TabPages.Add($offset)
+$deskScaleTab=[Windows.Forms.TabPage]::new('  Desk Scale  ');$deskScaleTab.BackColor=$bg;$tabs.TabPages.Add($deskScaleTab)
+$ringTab=[Windows.Forms.TabPage]::new('  Ring Challenge  ');$ringTab.BackColor=$bg;$tabs.TabPages.Add($ringTab)
+$mapping=[Windows.Forms.TabPage]::new('  Hand Mapping  ');$mapping.BackColor=$bg;$tabs.TabPages.Add($mapping)
+$gaze=[Windows.Forms.TabPage]::new('  Gaze Settings  ');$gaze.BackColor=$bg;$tabs.TabPages.Add($gaze)
 $axes=[Windows.Forms.TabPage]::new('  Debug Axes  ');$axes.BackColor=$bg;$tabs.TabPages.Add($axes)
 $c=Card 14 16 880 154;$setup.Controls.Add($c);$h=Label '1  CONNECTION' 20 12 250;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$c.Controls.Add($h);$c.Controls.Add((Label 'Run mode' 20 50 85))
 $mode=[Windows.Forms.ComboBox]::new();$mode.DropDownStyle='DropDownList';$mode.Location=[Drawing.Point]::new(110,48);$mode.Size=[Drawing.Size]::new(250,28);[void]$mode.Items.Add('Quest Link / Unity Editor');[void]$mode.Items.Add('Standalone Quest');$mode.SelectedItem=[string]$cfg.defaultMode;$c.Controls.Add($mode)
@@ -59,13 +118,52 @@ $b=Button '1. Begin Anchor Placement' 20 54 405 48 $true;$b.Add_Click({Send 'BEG
 $h=Label '3. Desk angle adjustment' 20 125 280;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$w.Controls.Add($h);$items=@(@('-5 deg','ROTATE_DESK_LEFT_LARGE'),@('-1 deg','ROTATE_DESK_LEFT'),@('+1 deg','ROTATE_DESK_RIGHT'),@('+5 deg','ROTATE_DESK_RIGHT_LARGE'));for($i=0;$i-lt4;$i++){$x=$items[$i];$b=Button $x[0] (20+$i*142) 160 126;$cmd=$x[1];$b.Add_Click({Send $cmd}.GetNewClosure());$w.Controls.Add($b)};$b=Button 'Reset angle' 588 160 126;$b.Add_Click({Send 'RESET_DESK_ROTATION'});$w.Controls.Add($b)
 $b=Button '4. Confirm Desk + Start Spatial Anchor Mode' 20 222 830 52 $true;$b.Add_Click({Send 'CONFIRM_DESK_ALIGNMENT';[Threading.Thread]::Sleep(200);Send 'USE_SPATIAL_ANCHOR_REDIRECTION'});$w.Controls.Add($b)
 $b=Button 'Gaze Debug ON' 20 303 160 34;$b.Add_Click({Send 'ENABLE_GAZE_DEBUG_VISUALS'});$w.Controls.Add($b);$b=Button 'Gaze Debug OFF' 192 303 160 34;$b.Add_Click({Send 'DISABLE_GAZE_DEBUG_VISUALS'});$w.Controls.Add($b)
+$b=Button 'Next Participant / Reset Objects' 364 303 270 34 $false $true;$b.Add_Click({Send 'RESET_EXPERIENCE_FOR_NEXT_PARTICIPANT';Message 'Next Participant reset requested.'});$w.Controls.Add($b)
 $b=Button 'Open Advanced Control' 650 303 200 34;$b.Add_Click({$p=Join-Path $root 'Tools\SpatialAnchorCalibration\pc_anchor_control_window.ps1';Start-Process powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"{0}"' -f $p)) -WindowStyle Normal});$w.Controls.Add($b)
 
-$o=Card 14 16 880 547;$offset.Controls.Add($o);$h=Label 'PER-OBJECT TRACKER OFFSETS' 20 12 360;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$o.Controls.Add($h);$q=Label 'Press Play, load current values from Unity, then edit position (meters) or rotation (degrees).' 20 43 830 30;$q.ForeColor=$muted;$o.Controls.Add($q)
-$grid=[Windows.Forms.DataGridView]::new();$grid.Location=[Drawing.Point]::new(20,82);$grid.Size=[Drawing.Size]::new(838,335);$grid.BackgroundColor=$white;$grid.BorderStyle='None';$grid.GridColor=$line;$grid.RowHeadersVisible=$false;$grid.AllowUserToAddRows=$false;$grid.AllowUserToDeleteRows=$false;$grid.SelectionMode='FullRowSelect';$grid.MultiSelect=$false;$grid.AutoSizeColumnsMode='Fill';$grid.ColumnHeadersHeight=38;$grid.RowTemplate.Height=38;$grid.EnableHeadersVisualStyles=$false;$grid.ColumnHeadersDefaultCellStyle.BackColor=$navy;$grid.ColumnHeadersDefaultCellStyle.ForeColor=$white;$grid.DefaultCellStyle.SelectionBackColor=[Drawing.ColorTranslator]::FromHtml('#DBEAFE');$grid.DefaultCellStyle.SelectionForeColor=$ink
+$ds=Card 14 16 880 310;$deskScaleTab.Controls.Add($ds);$h=Label 'MANUAL DESK SCALE' 24 18 480;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',13);$ds.Controls.Add($h);$q=Label 'Applies an exact scale through the same desk, 3DGS room, and hand-mapping path used by the VR slider.' 24 56 820 42;$q.ForeColor=$muted;$ds.Controls.Add($q)
+$ds.Controls.Add((Label 'Target scale' 24 120 180));$manualDeskScale=[Windows.Forms.TextBox]::new();$manualDeskScale.Text='1';$manualDeskScale.Location=[Drawing.Point]::new(205,116);$manualDeskScale.Size=[Drawing.Size]::new(130,30);$manualDeskScale.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$ds.Controls.Add($manualDeskScale);$ds.Controls.Add((Label 'x' 342 120 30))
+$disableDeskScaleBlackout=[Windows.Forms.CheckBox]::new();$disableDeskScaleBlackout.Text='Disable HMD blackout';$disableDeskScaleBlackout.Checked=$false;$disableDeskScaleBlackout.Location=[Drawing.Point]::new(400,116);$disableDeskScaleBlackout.Size=[Drawing.Size]::new(230,30);$disableDeskScaleBlackout.ForeColor=$ink;$disableDeskScaleBlackout.BackColor=[Drawing.Color]::Transparent;$ds.Controls.Add($disableDeskScaleBlackout)
+$b=Button 'Load Current Scale' 24 180 220 44;$b.Add_Click({Send 'GET_DESK_SCALE'});$ds.Controls.Add($b);$b=Button 'Apply Manual Scale' 260 180 260 44 $true;$b.Add_Click({try{$v=TextNum $manualDeskScale;if([double]$v-le0){throw 'Scale must be greater than zero.'};$fade=if($disableDeskScaleBlackout.Checked){'0'}else{'1'};SaveLauncherState;Send "SET_DESK_SCALE $v $fade";$deskScaleState.Text=if($fade-eq'1'){'Blackout requested; waiting for Unity'}else{'Scale change requested'};$deskScaleState.ForeColor=$muted;Message "Manual desk scale sent: ${v}x"}catch{Message $_.Exception.Message $true}});$ds.Controls.Add($b)
+$q=Label 'Default: fade to black for 1 second, change scale while black, then fade back for 1 second. Range: 1.00x - 3.00x.' 24 246 830 28;$q.ForeColor=$ink;$ds.Controls.Add($q);$deskScaleState=Label 'Unity Play is required' 550 190 280 24;$deskScaleState.ForeColor=$muted;$ds.Controls.Add($deskScaleState)
+
+$rc=Card 14 16 880 547;$ringTab.Controls.Add($rc);$h=Label 'SCALE PLACEMENT RING CHALLENGE' 24 14 600;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',13);$rc.Controls.Add($h);$q=Label 'Positions and front/left/right use RedirectionOrigin. Configure the selected pattern below.' 24 46 820 28;$q.ForeColor=$muted;$rc.Controls.Add($q)
+$ringPatternDisplay=Label 'PATTERN A' 24 78 820 50;$ringPatternDisplay.TextAlign='MiddleCenter';$ringPatternDisplay.Font=[Drawing.Font]::new('Segoe UI Semibold',20);$ringPatternDisplay.ForeColor=$white;$ringPatternDisplay.BackColor=$blue;$rc.Controls.Add($ringPatternDisplay)
+$items=@(@('Pattern A - Right','A'),@('Pattern B - Front','B'),@('Pattern C - Left','C'));for($i=0;$i-lt3;$i++){$item=$items[$i];$b=Button $item[0] (24+$i*274) 144 254 42 $true;$pattern=$item[1];$b.Add_Click({try{$script:selectedRingPattern=$pattern;$row=RingSettingsRow $pattern;if(!$row){throw "Pattern $pattern row was not found."};$ringSettingsGrid.ClearSelection();$row.Selected=$true;SendRingSettingsRow $row;$reset=if($resetSizesOnRingSwitch.Checked){'1'}else{'0'};$ringPatternDisplay.Text="PATTERN $pattern";$ringPatternState.Text='Settings applied; switch requested';SaveLauncherState;Send "SET_TARGET_RING_PATTERN $pattern $reset";Send "GET_TARGET_RING_SETTINGS $pattern"}catch{Message $_.Exception.Message $true}}.GetNewClosure());$rc.Controls.Add($b)}
+$resetSizesOnRingSwitch=[Windows.Forms.CheckBox]::new();$resetSizesOnRingSwitch.Text='Reset desk and object sizes when switching';$resetSizesOnRingSwitch.Checked=$true;$resetSizesOnRingSwitch.Location=[Drawing.Point]::new(24,196);$resetSizesOnRingSwitch.Size=[Drawing.Size]::new(390,28);$resetSizesOnRingSwitch.ForeColor=$ink;$resetSizesOnRingSwitch.BackColor=[Drawing.Color]::Transparent;$rc.Controls.Add($resetSizesOnRingSwitch)
+$ringUniformScale=[Windows.Forms.CheckBox]::new();$ringUniformScale.Text='Copy X target scale to Y / Z when applying';$ringUniformScale.Checked=$true;$ringUniformScale.Location=[Drawing.Point]::new(458,196);$ringUniformScale.Size=[Drawing.Size]::new(370,28);$ringUniformScale.ForeColor=$ink;$ringUniformScale.BackColor=[Drawing.Color]::Transparent;$rc.Controls.Add($ringUniformScale)
+$ringSettingsGrid=[Windows.Forms.DataGridView]::new();$ringSettingsGrid.Location=[Drawing.Point]::new(24,230);$ringSettingsGrid.Size=[Drawing.Size]::new(820,155);$ringSettingsGrid.BackgroundColor=$white;$ringSettingsGrid.BorderStyle='None';$ringSettingsGrid.RowHeadersVisible=$false;$ringSettingsGrid.AllowUserToAddRows=$false;$ringSettingsGrid.AllowUserToDeleteRows=$false;$ringSettingsGrid.SelectionMode='FullRowSelect';$ringSettingsGrid.MultiSelect=$false;$ringSettingsGrid.AutoSizeColumnsMode='Fill';$ringSettingsGrid.ColumnHeadersHeight=38;$ringSettingsGrid.RowTemplate.Height=36;$ringSettingsGrid.EnableHeadersVisualStyles=$false;$ringSettingsGrid.ColumnHeadersDefaultCellStyle.BackColor=$navy;$ringSettingsGrid.ColumnHeadersDefaultCellStyle.ForeColor=$white;$ringSettingsGrid.DefaultCellStyle.SelectionBackColor=[Drawing.ColorTranslator]::FromHtml('#DBEAFE');$ringSettingsGrid.DefaultCellStyle.SelectionForeColor=$ink
+$patternColumn=[Windows.Forms.DataGridViewTextBoxColumn]::new();$patternColumn.Name='Pattern';$patternColumn.HeaderText='Pattern';$patternColumn.ReadOnly=$true;[void]$ringSettingsGrid.Columns.Add($patternColumn)
+$targetColumn=[Windows.Forms.DataGridViewComboBoxColumn]::new();$targetColumn.Name='Target';$targetColumn.HeaderText='Target Object';$targetColumn.FlatStyle='Flat';[void]$targetColumn.Items.AddRange([object[]]@('1','3','4'));[void]$ringSettingsGrid.Columns.Add($targetColumn)
+foreach($x in @(@('SX','Scale X'),@('SY','Scale Y'),@('SZ','Scale Z'),@('TX','Size Tol X'),@('TY','Size Tol Y'),@('TZ','Size Tol Z'),@('PX','Pos Tol X'),@('PY','Height ignored'),@('PZ','Pos Tol Z'))){[void]$ringSettingsGrid.Columns.Add($x[0],$x[1])};$ringSettingsGrid.Columns[9].ReadOnly=$true;$ringSettingsGrid.Columns[0].FillWeight=54;$ringSettingsGrid.Columns[1].FillWeight=92
+foreach($r in @(@('A','1','1.35','1.35','1.35','0.10','0.10','0.10','0.09','0.10','0.09'),@('B','3','1.70','1.70','1.70','0.10','0.10','0.10','0.09','0.10','0.09'),@('C','4','2.10','2.10','2.10','0.10','0.10','0.10','0.09','0.10','0.09'))){[void]$ringSettingsGrid.Rows.Add($r)};$ringSettingsGrid.Rows[0].Selected=$true;$rc.Controls.Add($ringSettingsGrid)
+function SendRingSettingsRow($r){$id=[string]$r.Cells[0].Value;$target=[string]$r.Cells[1].Value;if($target-notin@('1','3','4')){throw 'Select target object 1, 3, or 4.'};$v=for($i=2;$i-le10;$i++){Num $r $i};if($ringUniformScale.Checked){$v[1]=$v[0];$v[2]=$v[0];$r.Cells[3].Value=$v[0];$r.Cells[4].Value=$v[0]};if([double]$v[0]-le0-or[double]$v[1]-le0-or[double]$v[2]-le0){throw 'Target scales must be greater than zero.'};for($i=3;$i-le5;$i++){if([double]$v[$i]-lt0){throw 'Size tolerances cannot be negative.'}};if([double]$v[6]-le0-or[double]$v[8]-le0){throw 'X/Z position tolerances must be greater than zero.'};Send ("SET_TARGET_RING_SETTINGS {0} {1} {2}" -f $id,$target,($v-join' '))}
+$b=Button 'Load A / B / C' 24 400 190 40;$b.Add_Click({Send 'GET_TARGET_RING_SETTINGS A';Send 'GET_TARGET_RING_SETTINGS B';Send 'GET_TARGET_RING_SETTINGS C'});$rc.Controls.Add($b)
+$b=Button 'Apply Selected' 228 400 190 40 $true;$b.Add_Click({try{$r=SelectedRingSettingsRow;SendRingSettingsRow $r;SaveLauncherState;$ringPatternState.Text="Pattern $($r.Cells[0].Value) settings sent";$ringPatternState.ForeColor=$muted}catch{Message $_.Exception.Message $true}});$rc.Controls.Add($b)
+$b=Button 'Apply All + Save' 432 400 190 40 $true;$b.Add_Click({try{foreach($r in $ringSettingsGrid.Rows){SendRingSettingsRow $r};SaveLauncherState;$ringPatternState.Text='A / B / C settings sent';$ringPatternState.ForeColor=$muted}catch{Message $_.Exception.Message $true}});$rc.Controls.Add($b)
+$b=Button 'Ring Task OFF' 636 400 208 40 $false $true;$b.Add_Click({Send 'DISABLE_TARGET_RING_CHALLENGE'});$rc.Controls.Add($b)
+$q=Label 'Targets: 1 CubeWarped / 3 QuestCase / 4 Gun. Uniform XYZ uses the target longest dimension and a true circle.' 24 457 820 26;$q.ForeColor=$ink;$rc.Controls.Add($q);$ringPatternState=Label 'Unity Play is required' 24 501 760 24;$ringPatternState.ForeColor=$muted;$rc.Controls.Add($ringPatternState)
+
+$m=Card 14 16 880 270;$mapping.Controls.Add($m);$h=Label 'HAND MAPPING SCALE CHANGE' 24 18 480;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',13);$m.Controls.Add($h);$q=Label 'Controls how strongly redirected-hand mapping responds to object enlargement or reduction.' 24 56 800 28;$q.ForeColor=$muted;$m.Controls.Add($q)
+$m.Controls.Add((Label 'Hand mapping / object scale-change multiplier' 24 103 360));$handScale=[Windows.Forms.TextBox]::new();$handScale.Text='1';$handScale.Location=[Drawing.Point]::new(390,99);$handScale.Size=[Drawing.Size]::new(120,29);$handScale.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$m.Controls.Add($handScale)
+$b=Button 'Load' 530 95 90 38;$b.Add_Click({Send 'GET_HAND_MAPPING_SCALE_MULTIPLIER'});$m.Controls.Add($b);$b=Button 'Apply + Save' 632 95 130 38 $true;$b.Add_Click({try{$v=TextNum $handScale;if([double]$v-lt0){throw 'Multiplier must be zero or greater.'};Send "SET_HAND_MAPPING_SCALE_MULTIPLIER $v";Message "Hand mapping scale-change multiplier sent: ${v}x"}catch{Message $_.Exception.Message $true}});$m.Controls.Add($b);$b=Button 'Reset 1x' 772 95 85 38;$b.Add_Click({$handScale.Text='1';Send 'RESET_HAND_MAPPING_SCALE_MULTIPLIER'});$m.Controls.Add($b)
+$q=Label '1.0x = match object scale change    2.0x = twice the scale-change amount    0.0x = no scale-change mapping' 24 158 820 26;$q.ForeColor=$ink;$m.Controls.Add($q);$q=Label 'Example: if an object changes from 1.0x to 1.5x, 2.0x maps the hand as 2.0x (1 + (1.5 - 1) * 2).' 24 190 820 26;$q.ForeColor=$muted;$m.Controls.Add($q);$handScaleState=Label 'Unity Play is required' 24 229 360 24;$handScaleState.ForeColor=$muted;$m.Controls.Add($handScaleState)
+
+$gr=Card 14 16 880 420;$gaze.Controls.Add($gr);$h=Label 'GAZE TARGET SPHERES — PER OBJECT' 24 18 520;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',13);$gr.Controls.Add($h);$q=Label 'Select an object and set its HMD gaze-recognition sphere radius in meters.' 24 52 800 28;$q.ForeColor=$muted;$gr.Controls.Add($q)
+$gazeGrid=[Windows.Forms.DataGridView]::new();$gazeGrid.Location=[Drawing.Point]::new(24,88);$gazeGrid.Size=[Drawing.Size]::new(500,190);$gazeGrid.BackgroundColor=$white;$gazeGrid.BorderStyle='None';$gazeGrid.RowHeadersVisible=$false;$gazeGrid.AllowUserToAddRows=$false;$gazeGrid.AllowUserToDeleteRows=$false;$gazeGrid.SelectionMode='FullRowSelect';$gazeGrid.MultiSelect=$false;$gazeGrid.AutoSizeColumnsMode='Fill';$gazeGrid.ColumnHeadersHeight=38;$gazeGrid.RowTemplate.Height=42;$gazeGrid.EnableHeadersVisualStyles=$false;$gazeGrid.ColumnHeadersDefaultCellStyle.BackColor=$navy;$gazeGrid.ColumnHeadersDefaultCellStyle.ForeColor=$white;$gazeGrid.DefaultCellStyle.SelectionBackColor=[Drawing.ColorTranslator]::FromHtml('#DBEAFE');$gazeGrid.DefaultCellStyle.SelectionForeColor=$ink
+[void]$gazeGrid.Columns.Add('Id','Object ID');[void]$gazeGrid.Columns.Add('Radius','Radius (m)');$gazeGrid.Columns[0].ReadOnly=$true;foreach($r in @(@('1','0.2'),@('3','0.2'),@('4','0.2'))){[void]$gazeGrid.Rows.Add($r)};$gazeGrid.Rows[0].Selected=$true;$gr.Controls.Add($gazeGrid)
+$b=Button 'Load All' 550 88 270 42;$b.Add_Click({Send 'GET_GAZE_TARGET_RADIUS'});$gr.Controls.Add($b);$b=Button 'Apply Selected + Save' 550 146 270 42 $true;$b.Add_Click({try{$r=GazeRow;$id=[string]$r.Cells[0].Value;$v=Num $r 1;if([double]$v-lt0){throw 'Radius must be zero or greater.'};Send "SET_GAZE_TARGET_RADIUS $id $v";Message "Object $id gaze radius sent: $v m"}catch{Message $_.Exception.Message $true}});$gr.Controls.Add($b);$b=Button 'Reset Selected to 0.20 m' 550 204 270 42;$b.Add_Click({try{$r=GazeRow;$id=[string]$r.Cells[0].Value;$r.Cells[1].Value='0.2';Send "RESET_GAZE_TARGET_RADIUS $id"}catch{Message $_.Exception.Message $true}});$gr.Controls.Add($b)
+$q=Label 'Only gaze selection changes. Orange/blue Near/Far blend shells are unchanged.' 24 306 800 28;$q.ForeColor=$ink;$gr.Controls.Add($q);$gazeRadiusState=Label 'Unity Play is required' 24 352 360 24;$gazeRadiusState.ForeColor=$muted;$gr.Controls.Add($gazeRadiusState)
+
+$g=Card 14 16 880 139;$offset.Controls.Add($g);$h=Label 'DETECTED TRACKER POSES — DESKORIGIN LOCAL OFFSET' 20 10 500;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$g.Controls.Add($h);$q=Label 'Moves both detected-pose axes and objects. To raise them 5 cm, set Y to +0.05.' 20 38 590 24;$q.ForeColor=$muted;$g.Controls.Add($q)
+$groupX=[Windows.Forms.TextBox]::new();$groupY=[Windows.Forms.TextBox]::new();$groupZ=[Windows.Forms.TextBox]::new();$boxes=@(@('X',$groupX),@('Y',$groupY),@('Z',$groupZ));for($i=0;$i-lt3;$i++){$g.Controls.Add((Label $boxes[$i][0] (20+$i*145) 76 22));$boxes[$i][1].Text='0';$boxes[$i][1].Location=[Drawing.Point]::new((43+$i*145),73);$boxes[$i][1].Size=[Drawing.Size]::new(105,28);$g.Controls.Add($boxes[$i][1])}
+$b=Button 'Load' 475 69 105 36;$b.Add_Click({Send 'GET_TRACKER_GROUP_OFFSET'});$g.Controls.Add($b);$b=Button 'Apply + Save' 590 69 125 36 $true;$b.Add_Click({try{$x=TextNum $groupX;$y=TextNum $groupY;$z=TextNum $groupZ;Send "SET_TRACKER_GROUP_OFFSET $x $y $z";Message "Common DeskOrigin tracker offset sent: X=$x Y=$y Z=$z m"}catch{Message $_.Exception.Message $true}});$g.Controls.Add($b);$b=Button 'Reset' 725 69 115 36 $false $true;$b.Add_Click({$groupX.Text='0';$groupY.Text='0';$groupZ.Text='0';Send 'RESET_TRACKER_GROUP_OFFSET'});$g.Controls.Add($b);$groupState=Label 'Unity Play is required' 590 108 250 22;$groupState.ForeColor=$muted;$g.Controls.Add($groupState)
+
+$o=Card 14 165 880 398;$offset.Controls.Add($o);$h=Label 'PER-OBJECT TRACKER OFFSETS' 20 10 360;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$o.Controls.Add($h);$q=Label 'Optional tracker-center and rotation correction for each object.' 390 13 450 24;$q.ForeColor=$muted;$o.Controls.Add($q)
+$grid=[Windows.Forms.DataGridView]::new();$grid.Location=[Drawing.Point]::new(20,43);$grid.Size=[Drawing.Size]::new(838,240);$grid.BackgroundColor=$white;$grid.BorderStyle='None';$grid.GridColor=$line;$grid.RowHeadersVisible=$false;$grid.AllowUserToAddRows=$false;$grid.AllowUserToDeleteRows=$false;$grid.SelectionMode='FullRowSelect';$grid.MultiSelect=$false;$grid.AutoSizeColumnsMode='Fill';$grid.ColumnHeadersHeight=38;$grid.RowTemplate.Height=38;$grid.EnableHeadersVisualStyles=$false;$grid.ColumnHeadersDefaultCellStyle.BackColor=$navy;$grid.ColumnHeadersDefaultCellStyle.ForeColor=$white;$grid.DefaultCellStyle.SelectionBackColor=[Drawing.ColorTranslator]::FromHtml('#DBEAFE');$grid.DefaultCellStyle.SelectionForeColor=$ink
 foreach($x in @(@('Id','ID'),@('Name','Unity target'),@('PX','Pos X'),@('PY','Pos Y'),@('PZ','Pos Z'),@('RX','Rot X'),@('RY','Rot Y'),@('RZ','Rot Z'))){[void]$grid.Columns.Add($x[0],$x[1])};$grid.Columns[0].ReadOnly=$true;$grid.Columns[0].FillWeight=40;$grid.Columns[1].ReadOnly=$true;$grid.Columns[1].FillWeight=145
 foreach($r in @(@(1,'cubeRelativeToHmd',0,-0.04,-0.07,0,0,0),@(2,'Object ID 2',0,0,0,0,0,0),@(3,'cubeRelativeToHmd (2)',0.02,-0.02,-0.02,0,0,0),@(4,'cubeRelativeToHmd (3)',0,0,0,0,0,0))){[void]$grid.Rows.Add($r)};$grid.Rows[0].Selected=$true;$o.Controls.Add($grid)
-$b=Button 'Load from Unity' 20 440 190 42 $true;$b.Add_Click({Send 'GET_TRACKER_OFFSETS'});$o.Controls.Add($b);$b=Button 'Apply selected row' 224 440 210 42 $true;$b.Add_Click({try{$r=Row;$id=[int]$r.Cells[0].Value;$v=for($i=2;$i -lt 8;$i++){Num $r $i};Send ("SET_TRACKER_OFFSET {0} {1}" -f $id,($v -join ' '));Message "Object ID $id offset sent and saved."}catch{Message $_.Exception.Message $true}});$o.Controls.Add($b);$b=Button 'Reset selected to zero' 448 440 210 42 $false $true;$b.Add_Click({try{$r=Row;Send "RESET_TRACKER_OFFSET $([int]$r.Cells[0].Value)"}catch{Message $_.Exception.Message $true}});$o.Controls.Add($b);$q=Label 'Green rows were received from Unity. ID 2 may report an error if the Scene has no target.' 20 498 820;$q.ForeColor=$muted;$o.Controls.Add($q)
+$b=Button 'Load from Unity' 20 300 190 42 $true;$b.Add_Click({Send 'GET_TRACKER_OFFSETS'});$o.Controls.Add($b);$b=Button 'Apply selected row' 224 300 210 42 $true;$b.Add_Click({try{$r=Row;$id=[int]$r.Cells[0].Value;$v=for($i=2;$i -lt 8;$i++){Num $r $i};Send ("SET_TRACKER_OFFSET {0} {1}" -f $id,($v -join ' '));Message "Object ID $id offset sent and saved."}catch{Message $_.Exception.Message $true}});$o.Controls.Add($b);$b=Button 'Reset selected to zero' 448 300 210 42 $false $true;$b.Add_Click({try{$r=Row;Send "RESET_TRACKER_OFFSET $([int]$r.Cells[0].Value)"}catch{Message $_.Exception.Message $true}});$o.Controls.Add($b);$q=Label 'Green rows were received from Unity. ID 2 may report an error if the Scene has no target.' 20 356 820;$q.ForeColor=$muted;$o.Controls.Add($q)
 
 $a=Card 14 16 880 547;$axes.Controls.Add($a);$h=Label 'COORDINATE AXES VISIBILITY' 20 12 420;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',11);$a.Controls.Add($h);$q=Label 'Runtime controls require Unity Play. Scene-view controls also work before Play.' 20 43 820 28;$q.ForeColor=$muted;$a.Controls.Add($q)
 $h=Label 'All runtime axes' 20 92 270;$h.Font=[Drawing.Font]::new('Segoe UI Semibold',10);$a.Controls.Add($h);$b=Button 'Show All' 330 82 190 40 $true;$b.Add_Click({Send 'ENABLE_ALL_COORDINATE_AXES'});$a.Controls.Add($b);$b=Button 'Hide All' 536 82 190 40;$b.Add_Click({Send 'DISABLE_ALL_COORDINATE_AXES'});$a.Controls.Add($b)
@@ -84,6 +182,7 @@ $mode.Add_SelectedIndexChanged({
 $start.Add_Click({
     try {
         if ([string]::IsNullOrWhiteSpace((TargetIp))) { throw 'Quest IP is empty.' }
+        SaveLauncherState
         StartServices
         UnityEditorCommand 'PLAY'
         Message 'Services started and Unity Play requested. Continue with step 1.'
@@ -97,6 +196,7 @@ $timer = [Windows.Forms.Timer]::new()
 $timer.Interval = 250
 $timer.Add_Tick({ Poll; Status })
 $form.Add_Shown({
+    LoadLauncherState
     $standalone = $mode.SelectedItem -eq 'Standalone Quest'
     $ip.Enabled = $standalone
     $ipLabel.Enabled = $standalone
@@ -110,6 +210,7 @@ $form.Add_Shown({
     $timer.Start()
 })
 $form.Add_FormClosing({
+    SaveLauncherState
     $timer.Stop()
     if ($script:statusClient) {
         $script:statusClient.Close()

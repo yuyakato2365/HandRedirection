@@ -102,6 +102,13 @@ public class DeskScaleSliderPanel : MonoBehaviour
     public Material knobMaterial;
     public Material touchProbeMaterial;
 
+    [Header("Grab Visual / Audio Feedback")]
+    public bool playScaleAudioFeedback = true;
+    public float scaleAudioIntervalSec = 0.25f;
+    public float scaleAudioDeltaThreshold = 0.01f;
+    public Color knobIdleColor = new Color(0.95f, 0.95f, 0.92f, 1f);
+    public Color knobGrabbedColor = new Color(0.15f, 0.85f, 1f, 1f);
+
     private Transform panelBack;
     private Transform track;
     private Transform fill;
@@ -112,6 +119,8 @@ public class DeskScaleSliderPanel : MonoBehaviour
     private PinchProvider draggingPinch;
     private Matrix4x4 dragTrackWorldToLocal;
     private bool hasDragTrackFrame;
+    private float lastScaleAudioValue;
+    private float nextScaleAudioTime;
     private readonly List<ScaniverseMeshState> scaniverseMeshStates = new List<ScaniverseMeshState>();
     private readonly ScaledObject explicitPrimaryDeskState = new ScaledObject();
     private Transform uiFollowDesk;
@@ -181,6 +190,9 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
     private void OnDisable()
     {
+        draggingPinch = null;
+        hasDragTrackFrame = false;
+        UpdateKnobGrabVisual();
         RestoreScaniverseMeshes();
     }
 
@@ -230,6 +242,12 @@ public class DeskScaleSliderPanel : MonoBehaviour
         SetScale(currentScale, true);
     }
 
+    public float SetScaleFromExternal(float value)
+    {
+        SetScale(value, true);
+        return currentScale;
+    }
+
     public void RebuildImmediateForEditor()
     {
         AutoAssignReferencesIfNeeded();
@@ -277,7 +295,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
         panelBack = CreateCube("DeskScalePanel_Back", transform, Vector3.zero, new Vector3(panelSize.x, panelSize.y, panelThickness), panelMaterial, new Color(0.04f, 0.05f, 0.055f, 0.88f));
         track = CreateCube("DeskScaleSlider_Track", transform, new Vector3(0f, -0.015f, -0.008f), new Vector3(trackWidth, trackHeight, panelThickness * 0.7f), trackMaterial, new Color(0.22f, 0.24f, 0.25f, 1f));
         fill = CreateCube("DeskScaleSlider_Fill", transform, new Vector3(0f, -0.015f, -0.014f), new Vector3(trackWidth, trackHeight * 1.08f, panelThickness * 0.72f), fillMaterial, new Color(0.16f, 0.62f, 0.95f, 1f));
-        knob = CreateCube("DeskScaleSlider_Knob", transform, Vector3.zero, new Vector3(knobSize.x, knobSize.y, panelThickness * 1.2f), knobMaterial, new Color(0.95f, 0.95f, 0.92f, 1f));
+        knob = CreateCube("DeskScaleSlider_Knob", transform, Vector3.zero, new Vector3(knobSize.x, knobSize.y, panelThickness * 1.2f), knobMaterial, knobIdleColor);
         valueLabel = CreateValueLabel();
 
         if (showTouchProbe)
@@ -364,6 +382,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
         {
             draggingPinch = null;
             hasDragTrackFrame = false;
+            UpdateKnobGrabVisual();
             return;
         }
 
@@ -381,6 +400,10 @@ public class DeskScaleSliderPanel : MonoBehaviour
             draggingPinch = pinch;
             dragTrackWorldToLocal = track.worldToLocalMatrix;
             hasDragTrackFrame = true;
+            lastScaleAudioValue = currentScale;
+            nextScaleAudioTime = Time.realtimeSinceStartup + Mathf.Max(0.02f, scaleAudioIntervalSec);
+            UpdateKnobGrabVisual();
+            PlayScaleAudioCue(ExhibitionAudioFeedback.Cue.ScaleStart);
         }
         if (TryGetSliderT(pinch.PinchPosWorld, out float t))
             SetScale(Mathf.Lerp(minScale, maxScale, t), true);
@@ -417,6 +440,46 @@ public class DeskScaleSliderPanel : MonoBehaviour
         ApplyScaleToSceneObjects();
         ApplyScaniverseRoomDeformation();
         UpdateVisuals();
+        UpdateScaleAudioFeedback();
+    }
+
+    private void UpdateScaleAudioFeedback()
+    {
+        if (!Application.isPlaying || draggingPinch == null || !playScaleAudioFeedback ||
+            Time.realtimeSinceStartup < nextScaleAudioTime)
+            return;
+
+        float delta = currentScale - lastScaleAudioValue;
+        if (Mathf.Abs(delta) < scaleAudioDeltaThreshold)
+            return;
+
+        PlayScaleAudioCue(delta > 0f
+            ? ExhibitionAudioFeedback.Cue.ScaleUp
+            : ExhibitionAudioFeedback.Cue.ScaleDown);
+        lastScaleAudioValue = currentScale;
+        nextScaleAudioTime = Time.realtimeSinceStartup + Mathf.Max(0.02f, scaleAudioIntervalSec);
+    }
+
+    private void PlayScaleAudioCue(ExhibitionAudioFeedback.Cue cue)
+    {
+        if (playScaleAudioFeedback)
+            ExhibitionAudioFeedback.PlayCue(cue);
+    }
+
+    private void UpdateKnobGrabVisual()
+    {
+        if (knob == null)
+            return;
+
+        Renderer renderer = knob.GetComponent<Renderer>();
+        if (renderer == null || renderer.sharedMaterial == null)
+            return;
+
+        Color color = draggingPinch != null ? knobGrabbedColor : knobIdleColor;
+        if (renderer.sharedMaterial.HasProperty("_BaseColor"))
+            renderer.sharedMaterial.SetColor("_BaseColor", color);
+        if (renderer.sharedMaterial.HasProperty("_Color"))
+            renderer.sharedMaterial.SetColor("_Color", color);
     }
 
     public void SetScaniverseRoomDeformationEnabled(bool enabled)
@@ -1192,6 +1255,7 @@ public class DeskScaleSliderPanel : MonoBehaviour
 
         if (knob != null)
             knob.localPosition = new Vector3(x, trackY, -0.02f);
+        UpdateKnobGrabVisual();
 
         if (fill != null)
         {

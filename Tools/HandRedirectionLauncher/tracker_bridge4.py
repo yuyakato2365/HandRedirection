@@ -40,6 +40,7 @@ def parse_args():
         help="JSON configuration file",
     )
     parser.add_argument("--quest-ip", help="Override questIp from the configuration file")
+    parser.add_argument("--pid-file", help="Write the bridge process ID here while running")
     parser.add_argument("--list", "-l", action="store_true", help="List SteamVR devices and exit")
     parser.add_argument(
         "--wait-for-openvr",
@@ -49,6 +50,31 @@ def parse_args():
         help="Wait for SteamVR/OpenVR instead of failing immediately",
     )
     return parser.parse_args()
+
+
+def write_pid_file(path):
+    if not path:
+        return
+    absolute_path = os.path.abspath(path)
+    directory = os.path.dirname(absolute_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    temporary_path = f"{absolute_path}.{os.getpid()}.tmp"
+    with open(temporary_path, "w", encoding="ascii") as stream:
+        stream.write(str(os.getpid()))
+    os.replace(temporary_path, absolute_path)
+
+
+def remove_owned_pid_file(path):
+    if not path:
+        return
+    try:
+        with open(path, "r", encoding="ascii") as stream:
+            recorded_pid = int(stream.read().strip())
+        if recorded_pid == os.getpid():
+            os.remove(path)
+    except (OSError, ValueError):
+        pass
 
 
 def load_config(path, quest_ip_override=None):
@@ -414,10 +440,15 @@ def main():
     ack_sock.bind(("0.0.0.0", ACK_PORT))
     ack_sock.setblocking(False)
 
-    vr = initialize_openvr_with_retry(args.wait_for_openvr)
-    print("OpenVR initialized (Background).", flush=True)
-
+    vr = None
     try:
+        # Write the PID only after the single-instance ACK port was acquired.
+        # This prevents a failed duplicate start from overwriting the PID of
+        # the bridge that is already running.
+        write_pid_file(args.pid_file)
+        vr = initialize_openvr_with_retry(args.wait_for_openvr)
+        print("OpenVR initialized (Background).", flush=True)
+
         print_tracker_list(vr)
 
         if list_only:
@@ -494,7 +525,8 @@ def main():
         pass
     finally:
         try:
-            openvr.shutdown()
+            if vr is not None:
+                openvr.shutdown()
         except Exception:
             pass
         try:
@@ -502,9 +534,9 @@ def main():
             ack_sock.close()
         except Exception:
             pass
+        remove_owned_pid_file(args.pid_file)
         print("Shutdown.", flush=True)
 
 
 if __name__ == "__main__":
     main()
-

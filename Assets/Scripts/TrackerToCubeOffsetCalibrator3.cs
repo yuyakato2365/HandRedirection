@@ -123,8 +123,13 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     public string targetOffsetsPlayerPrefsKey = "HandRedirection.TrackerTargetOffsets";
 
     [Header("DeskOrigin Object Group Offset")]
-    [Tooltip("DeskOrigin-local position offset applied to every target object after tracker-specific offsets. Use this to move the whole object set relative to DeskOrigin axes.")]
+    [Tooltip("DeskOrigin-local position offset applied to every detected tracker pose. Both the detected-pose axes and driven objects move together.")]
     public Vector3 objectGroupDeskPositionOffset = Vector3.zero;
+
+    [Tooltip("Persist the common DeskOrigin-local tracker offset changed from StartHandRedirection.cmd.")]
+    public bool persistObjectGroupDeskPositionOffset = true;
+
+    public string objectGroupDeskPositionOffsetPlayerPrefsKey = "HandRedirection.TrackerObjectGroupDeskPositionOffset";
 
     [Header("Object Smoothing")]
     [Tooltip("0 disables smoothing. Larger values follow object position faster.")]
@@ -137,7 +142,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     public bool logBadPackets = false;
     public bool logReceivedIds = false;
     public bool logDeskPackets = false;
-    [Tooltip("Show red-X, green-Y, blue-Z axes at each raw detected tracker pose, before object-center and DeskOrigin-local offsets are applied.")]
+    [Tooltip("Show red-X, green-Y, blue-Z axes at each detected tracker pose after the common DeskOrigin-local detection offset, but before object-center offsets.")]
     public bool showDetectedPoseAxes = true;
     public float detectedPoseAxisLength = 0.12f;
     public float detectedPoseAxisLineWidth = 0.006f;
@@ -181,6 +186,7 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     private void Start()
     {
         LoadTargetOffsetsFromPrefs();
+        LoadObjectGroupDeskPositionOffsetFromPrefs();
         ValidateConfiguration();
 
         try
@@ -243,6 +249,45 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
     public IEnumerable<TargetEntry> EnumerateTargetOffsets()
     {
         return targets ?? new List<TargetEntry>();
+    }
+
+    public void SetObjectGroupDeskPositionOffset(Vector3 positionOffset, bool save = true)
+    {
+        objectGroupDeskPositionOffset = positionOffset;
+        if (save)
+            SaveObjectGroupDeskPositionOffsetToPrefs();
+    }
+
+    public void SaveObjectGroupDeskPositionOffsetToPrefs()
+    {
+        if (!persistObjectGroupDeskPositionOffset || string.IsNullOrWhiteSpace(objectGroupDeskPositionOffsetPlayerPrefsKey))
+            return;
+
+        PlayerPrefs.SetString(
+            objectGroupDeskPositionOffsetPlayerPrefsKey,
+            string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "{0:R} {1:R} {2:R}",
+                objectGroupDeskPositionOffset.x,
+                objectGroupDeskPositionOffset.y,
+                objectGroupDeskPositionOffset.z));
+        PlayerPrefs.Save();
+    }
+
+    public void LoadObjectGroupDeskPositionOffsetFromPrefs()
+    {
+        if (!persistObjectGroupDeskPositionOffset || string.IsNullOrWhiteSpace(objectGroupDeskPositionOffsetPlayerPrefsKey))
+            return;
+
+        string saved = PlayerPrefs.GetString(objectGroupDeskPositionOffsetPlayerPrefsKey, "");
+        string[] parts = saved.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 3 ||
+            !float.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float x) ||
+            !float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float y) ||
+            !float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float z))
+            return;
+
+        objectGroupDeskPositionOffset = new Vector3(x, y, z);
     }
 
     public void SaveTargetOffsetsToPrefs()
@@ -420,9 +465,14 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             if (!TryResolveObjectPoseInDeskOrigin(rel, hasDeskPose, deskPose, out Vector3 relPosInDeskOrigin, out Quaternion relRotInDeskOrigin))
                 continue;
 
+            // This is the user-adjustable detected tracker position. Apply the
+            // common DeskOrigin-local correction before both the debug axis and
+            // object-center mapping so the two can never disagree visually.
+            Vector3 adjustedDetectedPosInDeskOrigin = relPosInDeskOrigin + objectGroupDeskPositionOffset;
+
             if (showDetectedPoseAxes && !hiddenDetectedPoseAxisIds.Contains(target.objectId))
             {
-                Vector3 detectedPosW = deskPosW + (deskRotW * relPosInDeskOrigin);
+                Vector3 detectedPosW = deskPosW + (deskRotW * adjustedDetectedPosInDeskOrigin);
                 Quaternion detectedRotW = deskRotW * relRotInDeskOrigin;
                 UpdateDetectedPoseAxis(target.objectId, detectedPosW, detectedRotW);
             }
@@ -432,10 +482,10 @@ public class TrackerToCubeOffsetCalibrator3 : MonoBehaviour
             }
 
             Quaternion centerRotOffset = Quaternion.Euler(target.centerEulerOffset);
-            Vector3 centerInDeskPos = relPosInDeskOrigin + (relRotInDeskOrigin * target.centerOffsetInTracker);
+            Vector3 centerInDeskPos = adjustedDetectedPosInDeskOrigin + (relRotInDeskOrigin * target.centerOffsetInTracker);
             Quaternion centerInDeskRot = relRotInDeskOrigin * centerRotOffset;
 
-            Vector3 targetPosW = deskPosW + (deskRotW * (centerInDeskPos + objectGroupDeskPositionOffset + target.objectDeskPositionOffset));
+            Vector3 targetPosW = deskPosW + (deskRotW * (centerInDeskPos + target.objectDeskPositionOffset));
             Quaternion targetRotW = deskRotW * centerInDeskRot;
 
             ApplyPose(target.objTransform, targetPosW, targetRotW, positionLerp, rotationSlerp);

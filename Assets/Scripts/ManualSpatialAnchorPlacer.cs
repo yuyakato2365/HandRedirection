@@ -99,12 +99,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     [Tooltip("Place the anchor directly below the tracked right-hand root, ignoring PointerPose and the legacy placement offsets.")]
     public bool placeDirectlyBelowHandRoot = true;
     [Min(0f)]
-    [Tooltip("World-space distance below the tracked right-hand root used by direct hand placement.")]
+    [Tooltip("World-space distance below the tracked right-hand root used for DeskOrigin placement. The Spatial Anchor is created at this preview position, so DeskOrigin does not jump when placement is confirmed.")]
     public float directHandVerticalOffsetMeters = 0.05f;
     [Tooltip("Keep following the right hand after the first pinch. Leave disabled for the normal workflow: follow until first pinch, then lock in place.")]
     public bool keepFollowingRightHandUntilConfirmed = false;
-    [Tooltip("World-space offset applied to the final anchor placement pose. Use negative Y to place the anchor below the hand marker.")]
-    public Vector3 anchorPlacementWorldOffset = new Vector3(0f, -0.08f, 0f);
+    [Tooltip("Legacy world-space offset used only by non-direct placement modes. Direct right-hand placement ignores this value so a setup-only visual offset can never leak into confirmed tracker coordinates.")]
+    public Vector3 anchorPlacementWorldOffset = Vector3.zero;
 
     [Header("Hand Placement Confirmation")]
     [Tooltip("Right-hand pinch once locks the candidate pose, hold while locked fine-adjusts it, and two quick pinches confirm placement.")]
@@ -124,6 +124,19 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         ? CurrentAnchor.transform
         : (currentOvrSpatialAnchor != null ? currentOvrSpatialAnchor.transform : sessionAnchorTransform);
     public Pose CandidatePose => candidatePose;
+    public Pose PlacementVisualPose
+    {
+        get
+        {
+            Pose visualPose = candidatePose;
+            if (candidatePoseUsesDirectHandVisualOffset)
+                visualPose.position += Vector3.down * Mathf.Max(0f, directHandVerticalOffsetMeters);
+            return visualPose;
+        }
+    }
+    public Pose PlacementPoseForDesk => IsPlacementMode || !hasAnchorCreationPose
+        ? PlacementVisualPose
+        : anchorCreationPose;
     public bool IsPlacementMode { get; private set; }
     public bool IsCreatingAnchor => isCreatingAnchor;
     public bool IsCandidatePoseLocked => candidatePoseLocked;
@@ -144,6 +157,9 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
     public event Action<string> AnchorCreateFailed;
 
     private Pose candidatePose;
+    private bool candidatePoseUsesDirectHandVisualOffset;
+    private Pose anchorCreationPose;
+    private bool hasAnchorCreationPose;
     private GameObject anchorMarkerInstance;
     private OVRSpatialAnchor currentOvrSpatialAnchor;
     private Transform sessionAnchorTransform;
@@ -337,11 +353,12 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             return;
         }
 
+        PrepareAnchorCreationPose();
         IsPlacementMode = false;
         SetCandidatePoseLockState(false, false);
+        isCreatingAnchor = true;
         SetPreviewActive(false);
         SetStatusMessage("Creating Spatial Anchor...");
-        isCreatingAnchor = true;
         anchorCreateStartTime = Time.realtimeSinceStartup;
 
         if (useOvrSpatialAnchorPersistence)
@@ -376,7 +393,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
         ClearSessionAnchor();
 
-        var result = await anchorManager.TryAddAnchorAsync(candidatePose);
+        var result = await anchorManager.TryAddAnchorAsync(anchorCreationPose);
         if (!isCreatingAnchor)
             return;
 
@@ -743,23 +760,56 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
 
     private void TryAutoAssignHand()
     {
-        if (!autoFindConfirmHand || confirmHand != null)
+        if (!autoFindConfirmHand)
             return;
 
-        OVRHand[] hands = FindObjectsByType<OVRHand>(FindObjectsSortMode.None);
+        // The scene contains more than one OVRHand. The first right-named
+        // component can be an inactive/synthetic hand, and the old code kept it
+        // forever even when another right hand was actively tracked.
+        if (confirmHand != null && confirmHand.IsTracked && IsRightHandCandidate(confirmHand))
+            return;
+
+        OVRHand[] hands = FindObjectsByType<OVRHand>(FindObjectsInactive.Include, FindObjectsSortMode.None);
         if (hands == null || hands.Length == 0)
             return;
 
+        OVRHand trackedRight = null;
+        OVRHand rightFallback = null;
+        OVRHand trackedFallback = null;
+        OVRHand anyFallback = null;
         for (int i = 0; i < hands.Length; i++)
         {
-            if (hands[i] != null && hands[i].name.ToLowerInvariant().Contains("right"))
+            OVRHand hand = hands[i];
+            if (hand == null)
+                continue;
+
+            anyFallback ??= hand;
+            if (hand.IsTracked)
+                trackedFallback ??= hand;
+
+            if (!IsRightHandCandidate(hand))
+                continue;
+
+            rightFallback ??= hand;
+            if (hand.IsTracked)
             {
-                confirmHand = hands[i];
-                return;
+                trackedRight = hand;
+                break;
             }
         }
 
-        confirmHand = hands[0];
+        confirmHand = trackedRight ?? rightFallback ?? trackedFallback ?? anyFallback;
+    }
+
+    private static bool IsRightHandCandidate(OVRHand hand)
+    {
+        if (hand == null)
+            return false;
+
+        string objectName = hand.name.ToLowerInvariant();
+        return objectName.Contains("right") ||
+               objectName.EndsWith("_r") ||
+               objectName.Contains("hand_r");
     }
 
     private void UpdateCandidatePose()
@@ -805,10 +855,17 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (TryGetLiveHandPlacementPose(out Pose handPose))
         {
             pose = handPose;
+            candidatePoseUsesDirectHandVisualOffset = placeDirectlyBelowHandRoot;
             if (!placeDirectlyBelowHandRoot)
                 ApplyCandidateWorldOffset(ref pose);
             return true;
         }
+
+        // Once a direct right-hand pose has been acquired, a transient hand
+        // tracking loss must not replace it with a camera/pointer pose or drop
+        // the selected 5 cm-below-hand DeskOrigin placement pose.
+        if (placeDirectlyBelowHandRoot && candidatePoseUsesDirectHandVisualOffset)
+            return false;
 
         Transform pointer = placementPointer != null ? placementPointer : (fallbackCamera != null ? fallbackCamera.transform : null);
         if (pointer == null)
@@ -846,14 +903,39 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
             pose = new Pose(position, MakeRotation(forward, Vector3.up));
         }
 
-        ApplyCandidateWorldOffset(ref pose);
+        // A fallback pose must never carry the legacy world offset into the
+        // persisted anchor when direct-hand placement is enabled. The requested
+        // 5 cm hand separation is applied once by PlacementVisualPose.
+        candidatePoseUsesDirectHandVisualOffset = placeDirectlyBelowHandRoot;
+        if (!placeDirectlyBelowHandRoot)
+            ApplyCandidateWorldOffset(ref pose);
         return true;
+    }
+
+    private void PrepareAnchorCreationPose()
+    {
+        // The visible DeskOrigin pose is the position the operator actually
+        // approves. Create the Spatial Anchor there as well. Keeping the anchor
+        // at the unshifted hand root made DeskOrigin jump upward by exactly
+        // directHandVerticalOffsetMeters when placement was confirmed.
+        anchorCreationPose = PlacementVisualPose;
+        hasAnchorCreationPose = true;
+
+        Debug.Log(
+            $"[ManualSpatialAnchorPlacer] Prepared anchor at approved DeskOrigin preview pose: " +
+            $"anchor={anchorCreationPose.position:F4}, handSource={candidatePose.position:F4}, " +
+            $"placementOffset={Vector3.Distance(candidatePose.position, anchorCreationPose.position):0.###}m");
     }
 
     private void PublishCandidatePose()
     {
         if (previewObject != null)
-            previewObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+        {
+            // Show the exact pose that will become the Spatial Anchor. This
+            // keeps the anchor marker, DeskOrigin and confirmed pose coincident.
+            Pose visualPose = PlacementVisualPose;
+            previewObject.transform.SetPositionAndRotation(visualPose.position, visualPose.rotation);
+        }
         CandidatePoseUpdated?.Invoke(candidatePose);
     }
 
@@ -890,11 +972,9 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
                 trackedRootPose = new Pose(confirmHand.transform.position, confirmHand.transform.rotation);
             }
 
-            Vector3 trackedRootPosition = trackedRootPose.position;
             Quaternion trackedRootRotation = trackedRootPose.rotation;
-            trackedRootPosition += Vector3.down * Mathf.Max(0f, directHandVerticalOffsetMeters);
             Vector3 handForward = trackedRootRotation * Vector3.forward;
-            pose = new Pose(trackedRootPosition, MakeRotation(handForward, Vector3.up));
+            pose = new Pose(trackedRootPose.position, MakeRotation(handForward, Vector3.up));
             return true;
         }
 
@@ -994,7 +1074,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         ClearRuntimeAnchors();
 
         GameObject anchorObject = new GameObject("PersistentDeskAnchor");
-        anchorObject.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+        anchorObject.transform.SetPositionAndRotation(anchorCreationPose.position, anchorCreationPose.rotation);
         OVRSpatialAnchor ovrAnchor = anchorObject.AddComponent<OVRSpatialAnchor>();
 
         bool localized = await ovrAnchor.WhenLocalizedAsync();
@@ -1114,7 +1194,7 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         ClearSessionAnchor();
 
         GameObject sessionAnchor = new GameObject("PCVRSessionAnchor");
-        sessionAnchor.transform.SetPositionAndRotation(candidatePose.position, candidatePose.rotation);
+        sessionAnchor.transform.SetPositionAndRotation(anchorCreationPose.position, anchorCreationPose.rotation);
         sessionAnchorTransform = sessionAnchor.transform;
         LastAnchorWasLoadedSavedAnchor = false;
 
@@ -1185,13 +1265,15 @@ public class ManualSpatialAnchorPlacer : MonoBehaviour
         if (previewObject != null)
             previewObject.SetActive(visible && (IsPlacementMode || !hidePreviewWhenIdle));
         if (anchorMarkerInstance != null)
-            anchorMarkerInstance.SetActive(visible);
+            anchorMarkerInstance.SetActive(visible && !IsPlacementMode && !isCreatingAnchor);
     }
 
     private void SetPreviewActive(bool active)
     {
         if (previewObject != null)
             previewObject.SetActive(showAnchorCoordinateAxes && (active || !hidePreviewWhenIdle));
+        if (anchorMarkerInstance != null)
+            anchorMarkerInstance.SetActive(showAnchorCoordinateAxes && !active && !isCreatingAnchor);
     }
 
     private void EnsureDefaultVisuals()
