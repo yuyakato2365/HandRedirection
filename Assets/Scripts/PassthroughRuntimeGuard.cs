@@ -31,6 +31,7 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
 
     private ManualSpatialAnchorPlacer anchorPlacer;
     private SpatialAnchorToDeskOriginBinder deskBinder;
+    private bool placementFadeWasActive;
 
     private IEnumerator Start()
     {
@@ -74,13 +75,15 @@ public sealed class PassthroughRuntimeGuard : MonoBehaviour
         if (deskBinder == null)
             deskBinder = FindFirstObjectByType<SpatialAnchorToDeskOriginBinder>();
 
-        // The placement fader owns material surface/blend state while this is active.
-        // Re-normalizing the same materials to opaque here caused both failed fading
-        // and visible frame-to-frame flashing depending on script execution order.
-        if (AnchorPlacementSceneFader.IsPlacementVisualFadeActive(anchorPlacer, deskBinder))
-            return;
-
-        ConfigureActiveScaniverseMaterials(false);
+        // Never rewrite the room's shared materials every frame. On Quest those
+        // mutations can race the compositor and make the entire view flash even
+        // though the desktop Scene view remains stable. The placement fader owns
+        // them while fading; restore opaque state exactly once when fading ends.
+        bool placementFadeActive =
+            AnchorPlacementSceneFader.IsPlacementVisualFadeActive(anchorPlacer, deskBinder);
+        if (placementFadeWasActive && !placementFadeActive)
+            ConfigureActiveScaniverseMaterials(false);
+        placementFadeWasActive = placementFadeActive;
     }
 
     private void ConfigureActiveScaniverseMaterials(bool logResult = true)

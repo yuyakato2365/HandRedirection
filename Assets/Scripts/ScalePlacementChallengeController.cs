@@ -23,6 +23,19 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
     }
 
     [Serializable]
+    public class RingCharacter
+    {
+        [Tooltip("PANDA, GORILLA, or ELEPHANT. The order is always smallest, middle, largest Ring.")]
+        public string id = "PANDA";
+        [Tooltip("Optional explicit model root. When empty, a matching child is found below Characters.")]
+        public Transform character;
+        [Tooltip("Character horizontal diameter divided by its assigned Ring diameter.")]
+        [Min(0.01f)] public float ringSizeMultiplier = 1f;
+        [Tooltip("Optional correction when the imported model's local +Z is not its visual front.")]
+        public float forwardYawOffsetDegrees;
+    }
+
+    [Serializable]
     private struct SavedPatternSettings
     {
         public int version;
@@ -31,6 +44,12 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         public Vector3 targetScaleRatio;
         public Vector3 scaleToleranceRatio;
         public Vector3 positionToleranceMeters;
+    }
+
+    private struct PatternFootprint
+    {
+        public Pattern pattern;
+        public Vector2 radii;
     }
 
     [Header("References")]
@@ -59,6 +78,24 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
     public string patternSettingsPrefsKeyPrefix = "HandRedirection.TargetRingSettings.";
     [Tooltip("Start with the ring task disabled. Selecting A/B/C explicitly enables it.")]
     public bool enableChallengeOnStart = false;
+
+    [Header("Ring Characters")]
+    [Tooltip("Parent containing Panda, Gorilla, and Elephant. Automatically finds a GameObject named Characters when empty.")]
+    public Transform charactersRoot;
+    public RingCharacter[] ringCharacters =
+    {
+        new RingCharacter { id = "PANDA", ringSizeMultiplier = 1f },
+        new RingCharacter { id = "GORILLA", ringSizeMultiplier = 1f },
+        new RingCharacter { id = "ELEPHANT", ringSizeMultiplier = 1f }
+    };
+    [Tooltip("Empty space between the outer edge of a Ring and the corresponding character behind it.")]
+    [Min(0f)] public float characterBehindRingGapMeters = 0.08f;
+    [Tooltip("Shared rotation correction around the tabletop-normal axis after all characters face RedirectionOrigin.")]
+    public float globalCharacterYawOffsetDegrees;
+    public bool showRingCharacters = true;
+    public bool persistCharacterSettings = true;
+    public string characterMultiplierPrefsKeyPrefix = "HandRedirection.RingCharacterMultiplier.";
+    public string characterYawPrefsKey = "HandRedirection.RingCharacterYawOffset";
 
     [Header("Ring Visual")]
     [Range(24, 128)] public int ringSegments = 72;
@@ -92,10 +129,20 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
     private bool lastDiagnosticSizeCorrect;
     private readonly Dictionary<GoGoInteractionController_NoY3.WarpObjectEntry, Vector3> baselineScaleByEntry
         = new Dictionary<GoGoInteractionController_NoY3.WarpObjectEntry, Vector3>();
+    private bool charactersResolved;
+    private bool characterPlacementDirty = true;
+    private int nextCharacterResolveFrame;
+    private bool characterAssignmentsDirty = true;
+    private bool characterAssignmentsNeedRetry;
+    private int nextCharacterAssignmentRetryFrame;
+    private readonly List<PatternFootprint> characterPatternAssignments = new List<PatternFootprint>(3);
+    private readonly HashSet<int> alwaysOnTopConfiguredRenderers = new HashSet<int>();
 
     private void Awake()
     {
         LoadAllPatternSettings();
+        EnsureCharacterDefinitions();
+        LoadCharacterSettings();
         if (persistActivePattern && !string.IsNullOrWhiteSpace(activePatternPrefsKey))
             activePatternId = PlayerPrefs.GetString(activePatternPrefsKey, activePatternId);
     }
@@ -103,6 +150,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
     private void Start()
     {
         ResolveReferences();
+        ResolveCharacters();
         CreateRing();
         challengeEnabled = false;
         ring.gameObject.SetActive(false);
@@ -111,6 +159,17 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             if (!ActivatePattern(activePatternId, false, false))
                 ActivatePattern("A", false, false);
         }
+        UpdateCharacterPlacements();
+    }
+
+    private void LateUpdate()
+    {
+        if (!challengeEnabled) return;
+        bool retryMissingReferences = (!charactersResolved || charactersRoot == null || deskOrigin == null) &&
+                                      Time.frameCount >= nextCharacterResolveFrame;
+        bool retryRingGeometry = characterAssignmentsNeedRetry && Time.frameCount >= nextCharacterAssignmentRetryFrame;
+        if (characterPlacementDirty || retryMissingReferences || retryRingGeometry)
+            UpdateCharacterPlacements();
     }
 
     private void Update()
@@ -171,6 +230,8 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
 
         activePattern = next;
         activePatternId = next.id.ToUpperInvariant();
+        characterAssignmentsDirty = true;
+        characterPlacementDirty = true;
         challengeEnabled = true;
         successLatched = false;
         wasCorrect = false;
@@ -192,6 +253,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             PlayerPrefs.SetString(activePatternPrefsKey, activePatternId);
             PlayerPrefs.Save();
         }
+        UpdateCharacterPlacements();
         return true;
     }
 
@@ -202,6 +264,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         wasCorrect = false;
         if (ring != null)
             ring.gameObject.SetActive(false);
+        SetCharacterVisibility(false);
     }
 
     private void ResolveReferences()
@@ -210,19 +273,16 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             redirectionController = DeskScaleSliderPanel.FindBestRedirectionController();
         if (deskOrigin == null && redirectionController != null)
             deskOrigin = redirectionController.deskOrigin;
-        if (redirectionOrigin == null && redirectionController != null)
+        if (redirectionController != null && redirectionController.redirectionOrigin != null)
             redirectionOrigin = redirectionController.redirectionOrigin;
-        if (deskOrigin == null)
+        SpatialAnchorToDeskOriginBinder binder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
+        if (binder != null)
         {
-            SpatialAnchorToDeskOriginBinder binder = FindAnyObjectByType<SpatialAnchorToDeskOriginBinder>();
-            if (binder != null)
-            {
-                deskOrigin = binder.deskOrigin;
-                if (redirectionOrigin == null) redirectionOrigin = binder.redirectionOrigin;
-            }
+            if (deskOrigin == null) deskOrigin = binder.deskOrigin;
+            // This is the point confirmed after Begin Anchor Placement. Prefer it
+            // even when an earlier startup pass temporarily fell back to DeskOrigin.
+            if (binder.redirectionOrigin != null) redirectionOrigin = binder.redirectionOrigin;
         }
-        if (redirectionOrigin == null)
-            redirectionOrigin = deskOrigin;
         if (deskScaleSlider == null)
             deskScaleSlider = FindAnyObjectByType<DeskScaleSliderPanel>();
         if (tabletopReference == null && deskScaleSlider != null)
@@ -238,6 +298,259 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             if (patterns[i] != null && string.Equals(patterns[i].id, id, StringComparison.OrdinalIgnoreCase))
                 return patterns[i];
         return null;
+    }
+
+    private void EnsureCharacterDefinitions()
+    {
+        string[] ids = { "PANDA", "GORILLA", "ELEPHANT" };
+        if (ringCharacters == null || ringCharacters.Length != ids.Length)
+        {
+            RingCharacter[] previous = ringCharacters;
+            ringCharacters = new RingCharacter[ids.Length];
+            for (int i = 0; i < ids.Length; i++)
+            {
+                RingCharacter retained = null;
+                if (previous != null)
+                {
+                    for (int j = 0; j < previous.Length; j++)
+                        if (previous[j] != null && string.Equals(previous[j].id, ids[i], StringComparison.OrdinalIgnoreCase))
+                        { retained = previous[j]; break; }
+                }
+                ringCharacters[i] = retained ?? new RingCharacter { id = ids[i], ringSizeMultiplier = 1f };
+            }
+        }
+        for (int i = 0; i < ids.Length; i++)
+        {
+            if (ringCharacters[i] == null) ringCharacters[i] = new RingCharacter();
+            ringCharacters[i].id = ids[i];
+            ringCharacters[i].ringSizeMultiplier = Mathf.Max(0.01f, ringCharacters[i].ringSizeMultiplier);
+        }
+    }
+
+    private void ResolveCharacters()
+    {
+        EnsureCharacterDefinitions();
+        if (charactersRoot == null)
+        {
+            GameObject namedRoot = GameObject.Find("Characters") ?? GameObject.Find("Charachters");
+            if (namedRoot != null) charactersRoot = namedRoot.transform;
+        }
+        if (charactersRoot == null)
+        {
+            Transform[] all = FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            for (int i = 0; i < all.Length; i++)
+            {
+                Transform candidate = all[i];
+                if (candidate != null && candidate.gameObject.scene.IsValid() &&
+                    (string.Equals(candidate.name, "Characters", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(candidate.name, "Charachters", StringComparison.OrdinalIgnoreCase)))
+                { charactersRoot = candidate; break; }
+            }
+        }
+        if (charactersRoot == null)
+        {
+            nextCharacterResolveFrame = Time.frameCount + 30;
+            return;
+        }
+
+        Transform[] descendants = charactersRoot.GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < ringCharacters.Length; i++)
+        {
+            RingCharacter definition = ringCharacters[i];
+            if (definition.character != null) continue;
+            string search = definition.id.ToLowerInvariant();
+            for (int j = 0; j < descendants.Length; j++)
+            {
+                Transform candidate = descendants[j];
+                if (candidate == charactersRoot) continue;
+                if (candidate.name.ToLowerInvariant().Contains(search))
+                { definition.character = candidate; ConfigureCharacterRenderers(candidate); break; }
+            }
+            if (definition.character != null) ConfigureCharacterRenderers(definition.character);
+        }
+        charactersResolved = true;
+        for (int i = 0; i < ringCharacters.Length; i++)
+            charactersResolved &= ringCharacters[i].character != null;
+        nextCharacterResolveFrame = Time.frameCount + 30;
+    }
+
+    private RingCharacter FindCharacter(string characterId)
+    {
+        EnsureCharacterDefinitions();
+        if (string.IsNullOrWhiteSpace(characterId)) return null;
+        for (int i = 0; i < ringCharacters.Length; i++)
+            if (string.Equals(ringCharacters[i].id, characterId, StringComparison.OrdinalIgnoreCase))
+                return ringCharacters[i];
+        return null;
+    }
+
+    private void ConfigureCharacterRenderers(Transform character)
+    {
+        if (character == null) return;
+        Renderer[] renderers = character.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            Renderer renderer = renderers[i];
+            if (renderer == null || !alwaysOnTopConfiguredRenderers.Add(renderer.GetInstanceID()))
+                continue;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+            renderer.allowOcclusionWhenDynamic = false;
+            renderer.sortingOrder = short.MaxValue;
+
+            // Use runtime material instances so imported/shared character assets
+            // are not modified. Render after the scene and ignore its depth.
+            Material[] materials = renderer.materials;
+            for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
+            {
+                Material material = materials[materialIndex];
+                if (material == null) continue;
+                if (material.HasProperty("_ZTest"))
+                    material.SetFloat("_ZTest", (float)CompareFunction.Always);
+                if (material.HasProperty("_ZWrite"))
+                    material.SetFloat("_ZWrite", 0f);
+                material.renderQueue = 4000;
+            }
+        }
+    }
+
+    public bool TryGetCharacterMultiplier(string characterId, out float multiplier)
+    {
+        RingCharacter definition = FindCharacter(characterId);
+        multiplier = definition != null ? definition.ringSizeMultiplier : 1f;
+        return definition != null;
+    }
+
+    public bool SetCharacterMultiplier(string characterId, float multiplier, bool save = true)
+    {
+        RingCharacter definition = FindCharacter(characterId);
+        if (definition == null || !IsFinite(multiplier) || multiplier <= 0f)
+            return false;
+        definition.ringSizeMultiplier = Mathf.Max(0.01f, multiplier);
+        characterPlacementDirty = true;
+        if (save && persistCharacterSettings && !string.IsNullOrWhiteSpace(characterMultiplierPrefsKeyPrefix))
+        {
+            PlayerPrefs.SetFloat(characterMultiplierPrefsKeyPrefix + definition.id, definition.ringSizeMultiplier);
+            PlayerPrefs.Save();
+        }
+        UpdateCharacterPlacements();
+        return true;
+    }
+
+    public float GetGlobalCharacterYawOffset()
+    {
+        return globalCharacterYawOffsetDegrees;
+    }
+
+    public bool SetGlobalCharacterYawOffset(float degrees, bool save = true)
+    {
+        if (!IsFinite(degrees)) return false;
+        globalCharacterYawOffsetDegrees = Mathf.Repeat(degrees + 180f, 360f) - 180f;
+        characterPlacementDirty = true;
+        if (save && persistCharacterSettings && !string.IsNullOrWhiteSpace(characterYawPrefsKey))
+        {
+            PlayerPrefs.SetFloat(characterYawPrefsKey, globalCharacterYawOffsetDegrees);
+            PlayerPrefs.Save();
+        }
+        UpdateCharacterPlacements();
+        return true;
+    }
+
+    public bool TryGetCharacterLayout(
+        string characterId,
+        out string patternId,
+        out Vector2 deskPosition,
+        out float diagramRadius,
+        out float multiplier)
+    {
+        ResolveReferences();
+        RingCharacter definition = FindCharacter(characterId);
+        if (definition == null)
+        {
+            patternId = ""; deskPosition = Vector2.zero; diagramRadius = 0.1f; multiplier = 1f;
+            return false;
+        }
+        RefreshCharacterAssignments();
+        int characterIndex = Array.IndexOf(ringCharacters, definition);
+        if (characterIndex < 0 || characterIndex >= characterPatternAssignments.Count)
+        {
+            patternId = ""; deskPosition = Vector2.zero; diagramRadius = 0.1f;
+            multiplier = definition.ringSizeMultiplier;
+            return false;
+        }
+
+        PatternFootprint assignment = characterPatternAssignments[characterIndex];
+        patternId = assignment.pattern.id.ToUpperInvariant();
+        multiplier = definition.ringSizeMultiplier;
+        float ringRadius = Mathf.Max(assignment.radii.x, assignment.radii.y);
+        diagramRadius = ringRadius * multiplier;
+        Vector3 worldGroundCenter = GetCharacterWorldGroundCenter(assignment.pattern, ringRadius, diagramRadius);
+        deskPosition = WorldToDeskPlanarPosition(worldGroundCenter);
+        return true;
+    }
+
+    private void RefreshCharacterAssignments()
+    {
+        if (!characterAssignmentsDirty && characterPatternAssignments.Count == 3)
+        {
+            if (!characterAssignmentsNeedRetry || Time.frameCount < nextCharacterAssignmentRetryFrame)
+                return;
+        }
+        characterPatternAssignments.Clear();
+        characterAssignmentsNeedRetry = false;
+        if (patterns != null)
+        {
+            for (int i = 0; i < patterns.Length; i++)
+            {
+                Pattern pattern = patterns[i];
+                if (pattern == null) continue;
+                GoGoInteractionController_NoY3.WarpObjectEntry entry = FindEntryForPattern(pattern);
+                if (!TryCalculatePatternGeometry(pattern, entry, out _, out Vector2 radii))
+                {
+                    radii = new Vector2(0.12f, 0.12f);
+                    characterAssignmentsNeedRetry = true;
+                }
+                characterPatternAssignments.Add(new PatternFootprint { pattern = pattern, radii = radii });
+            }
+        }
+        characterPatternAssignments.Sort((a, b) =>
+        {
+            float ar = Mathf.Max(a.radii.x, a.radii.y);
+            float br = Mathf.Max(b.radii.x, b.radii.y);
+            int sizeComparison = ar.CompareTo(br);
+            return sizeComparison != 0 ? sizeComparison : string.CompareOrdinal(a.pattern.id, b.pattern.id);
+        });
+        characterAssignmentsDirty = false;
+        nextCharacterAssignmentRetryFrame = Time.frameCount + 30;
+    }
+
+    private Vector3 GetCharacterWorldGroundCenter(Pattern pattern, float ringRadius, float characterRadius)
+    {
+        Vector3 up = deskOrigin != null ? deskOrigin.up.normalized : Vector3.up;
+        Vector3 tabletopPoint = deskOrigin != null ? deskOrigin.position + up * tabletopHeight : Vector3.zero;
+        Vector3 ringGround = GetRingCenter(pattern);
+        ringGround -= up * Vector3.Dot(ringGround - tabletopPoint, up);
+        Transform origin = redirectionOrigin != null ? redirectionOrigin : deskOrigin;
+        Vector3 originGround = origin != null ? origin.position : tabletopPoint;
+        originGround -= up * Vector3.Dot(originGround - tabletopPoint, up);
+        Vector3 awayFromOrigin = Vector3.ProjectOnPlane(ringGround - originGround, up);
+        if (awayFromOrigin.sqrMagnitude < 1e-6f)
+        {
+            GetPatternAxes(out _, out _, out Vector3 fallbackForward);
+            awayFromOrigin = fallbackForward;
+        }
+        float behindDistance = Mathf.Max(0f, ringRadius) + Mathf.Max(0f, characterRadius) + characterBehindRingGapMeters;
+        return ringGround + awayFromOrigin.normalized * behindDistance;
+    }
+
+    private Vector2 WorldToDeskPlanarPosition(Vector3 worldPosition)
+    {
+        if (deskOrigin == null) return Vector2.zero;
+        Vector3 up = deskOrigin.up.normalized;
+        GetDeskPlanarAxes(up, out Vector3 deskRight, out Vector3 deskForward);
+        Vector3 delta = worldPosition - deskOrigin.position;
+        return new Vector2(Vector3.Dot(delta, deskRight), Vector3.Dot(delta, deskForward));
     }
 
     private void ResolveActiveEntry()
@@ -333,6 +646,8 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         pattern.targetScaleRatio = MaxComponents(targetScale, 0.01f);
         pattern.scaleToleranceRatio = MaxComponents(scaleTolerance, 0f);
         pattern.positionToleranceMeters = MaxComponents(positionTolerance, 0.001f);
+        characterAssignmentsDirty = true;
+        characterPlacementDirty = true;
         if (save)
             SavePatternSettings(pattern);
         if (activePattern == pattern)
@@ -345,6 +660,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             UpdateRingPose();
             UpdateRingColor(incorrectColor);
         }
+        UpdateCharacterPlacements();
         return true;
     }
 
@@ -379,25 +695,19 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         if (pattern == null || deskOrigin == null || !IsFinite(deskPosition.x) || !IsFinite(deskPosition.y))
             return false;
 
-        GetPatternAxes(out Vector3 patternRight, out Vector3 up, out Vector3 patternForward);
-        GetDeskPlanarAxes(up, out Vector3 deskRight, out Vector3 deskForward);
-        Transform origin = redirectionOrigin != null ? redirectionOrigin : deskOrigin;
-        Vector3 desiredWorld = deskOrigin.position + deskRight * deskPosition.x + deskForward * deskPosition.y;
-        Vector3 originOnDeskPlane = origin.position;
-        float originHeight = Vector3.Dot(originOnDeskPlane - deskOrigin.position, up);
-        originOnDeskPlane -= up * originHeight;
-        Vector3 delta = desiredWorld - originOnDeskPlane;
-        pattern.deskLocalPosition = new Vector2(
-            Vector3.Dot(delta, patternRight),
-            Vector3.Dot(delta, patternForward));
+        // Launcher diagram coordinates are RedirectionOrigin-local X/Z. Keep the
+        // serialized field name for settings compatibility, but never convert
+        // through DeskOrigin here.
+        pattern.deskLocalPosition = deskPosition;
+        characterPlacementDirty = true;
         if (save)
             SavePatternSettings(pattern);
         if (activePattern == pattern)
             UpdateRingPose();
+        UpdateCharacterPlacements();
         Debug.Log(
             $"[ScalePlacementChallenge] Pattern {pattern.id} position updated " +
-            $"DeskOriginLocalXZ=({deskPosition.x:F3},{deskPosition.y:F3}) " +
-            $"storedRedirectionXZ=({pattern.deskLocalPosition.x:F3},{pattern.deskLocalPosition.y:F3})");
+            $"RedirectionOriginLocalXZ=({pattern.deskLocalPosition.x:F3},{pattern.deskLocalPosition.y:F3})");
         return true;
     }
 
@@ -552,12 +862,9 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
 
     private Vector2 GetDeskOriginRelativePosition(Pattern pattern)
     {
-        if (deskOrigin == null || pattern == null)
-            return pattern != null ? pattern.deskLocalPosition : Vector2.zero;
-        Vector3 up = deskOrigin.up.normalized;
-        GetDeskPlanarAxes(up, out Vector3 deskRight, out Vector3 deskForward);
-        Vector3 delta = GetRingCenter(pattern) - deskOrigin.position;
-        return new Vector2(Vector3.Dot(delta, deskRight), Vector3.Dot(delta, deskForward));
+        // Kept under its old public-protocol name for launcher compatibility.
+        // Values are now always relative to the confirmed RedirectionOrigin.
+        return pattern != null ? pattern.deskLocalPosition : Vector2.zero;
     }
 
     private void GetDeskPlanarAxes(Vector3 up, out Vector3 deskRight, out Vector3 deskForward)
@@ -569,6 +876,134 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         Vector3 sourceRight = Vector3.ProjectOnPlane(deskOrigin.right, up).normalized;
         if (sourceRight.sqrMagnitude > 1e-6f && Vector3.Dot(deskRight, sourceRight) < 0f)
             deskRight = -deskRight;
+    }
+
+    private void UpdateCharacterPlacements()
+    {
+        if (!showRingCharacters || !challengeEnabled)
+        {
+            SetCharacterVisibility(false);
+            characterPlacementDirty = false;
+            return;
+        }
+
+        ResolveReferences();
+        if (!charactersResolved) ResolveCharacters();
+        if (charactersRoot == null || deskOrigin == null)
+        {
+            characterPlacementDirty = false;
+            nextCharacterResolveFrame = Time.frameCount + 30;
+            return;
+        }
+        if (!tabletopFrameCaptured)
+        {
+            tabletopHeight = ComputeTabletopHeight();
+            tabletopFrameCaptured = true;
+        }
+
+        RefreshCharacterAssignments();
+        int count = Mathf.Min(ringCharacters.Length, characterPatternAssignments.Count);
+        Vector3 up = deskOrigin.up.normalized;
+        GetDeskPlanarAxes(up, out Vector3 deskRight, out Vector3 deskForward);
+        int activeCharacterIndex = -1;
+        for (int i = 0; i < count; i++)
+        {
+            PatternFootprint assignment = characterPatternAssignments[i];
+            if (assignment.pattern == activePattern)
+            {
+                activeCharacterIndex = i;
+                break;
+            }
+        }
+        SetOnlyCharacterVisible(activeCharacterIndex);
+        if (activeCharacterIndex >= 0 && activeCharacterIndex < ringCharacters.Length)
+            Debug.Log($"[RingCharacterVisibilityV2] instance={GetInstanceID()} active={ringCharacters[activeCharacterIndex].id} pattern={activePattern.id}");
+        if (activeCharacterIndex >= 0 && activeCharacterIndex < count)
+        {
+            RingCharacter definition = ringCharacters[activeCharacterIndex];
+            PatternFootprint assignment = characterPatternAssignments[activeCharacterIndex];
+            if (definition == null || definition.character == null)
+            {
+                characterPlacementDirty = false;
+                return;
+            }
+            float assignedRingRadius = Mathf.Max(assignment.radii.x, assignment.radii.y);
+            float desiredRadius = Mathf.Max(0.01f,
+                assignedRingRadius * definition.ringSizeMultiplier);
+            Vector3 worldGroundCenter = GetCharacterWorldGroundCenter(assignment.pattern, assignedRingRadius, desiredRadius);
+            PlaceCharacter(definition, worldGroundCenter, desiredRadius, deskRight, up, deskForward);
+        }
+        characterPlacementDirty = false;
+    }
+
+    private void SetCharacterVisibility(bool visible)
+    {
+        if (!charactersResolved) ResolveCharacters();
+        if (ringCharacters == null) return;
+        for (int i = 0; i < ringCharacters.Length; i++)
+        {
+            Transform character = ringCharacters[i] != null ? ringCharacters[i].character : null;
+            if (character != null && character.gameObject.activeSelf != visible)
+                character.gameObject.SetActive(visible);
+        }
+    }
+
+    private void SetOnlyCharacterVisible(int visibleIndex)
+    {
+        if (ringCharacters == null) return;
+        for (int i = 0; i < ringCharacters.Length; i++)
+        {
+            Transform character = ringCharacters[i] != null ? ringCharacters[i].character : null;
+            bool shouldBeVisible = i == visibleIndex;
+            if (character != null && character.gameObject.activeSelf != shouldBeVisible)
+                character.gameObject.SetActive(shouldBeVisible);
+        }
+    }
+
+    private void PlaceCharacter(
+        RingCharacter definition,
+        Vector3 desiredGroundCenter,
+        float desiredRadius,
+        Vector3 deskRight,
+        Vector3 up,
+        Vector3 deskForward)
+    {
+        Transform character = definition.character;
+        if (!character.gameObject.activeSelf) character.gameObject.SetActive(true);
+        Transform facingTarget = redirectionOrigin != null ? redirectionOrigin : deskOrigin;
+        Vector3 towardOrigin = Vector3.ProjectOnPlane(facingTarget.position - desiredGroundCenter, up);
+        if (towardOrigin.sqrMagnitude > 1e-6f)
+        {
+            Quaternion faceOrigin = Quaternion.LookRotation(towardOrigin.normalized, up);
+            // Imported character models face opposite Unity's +Z convention.
+            // Flip the common baseline while preserving launcher/global and
+            // per-character adjustment values as additional offsets.
+            float yawCorrection = 180f + globalCharacterYawOffsetDegrees + definition.forwardYawOffsetDegrees;
+            character.rotation = faceOrigin * Quaternion.AngleAxis(yawCorrection, Vector3.up);
+        }
+
+        if (!TryGetVisualHalfExtents(character, deskRight, up, deskForward, out _, out Vector3 beforeScale))
+            return;
+        float currentRadius = Mathf.Max(beforeScale.x, beforeScale.z);
+        if (currentRadius > 1e-5f)
+        {
+            float scaleFactor = desiredRadius / currentRadius;
+            if (Mathf.Abs(scaleFactor - 1f) > 0.0005f)
+                character.localScale *= scaleFactor;
+        }
+
+        if (!TryGetVisualHalfExtents(character, deskRight, up, deskForward, out Vector3 visualCenter, out Vector3 halfExtents))
+            return;
+        Vector3 centerFromDesk = visualCenter - deskOrigin.position;
+        float currentBottomHeight = Vector3.Dot(centerFromDesk, up) - halfExtents.y;
+        Vector2 deskPosition = WorldToDeskPlanarPosition(desiredGroundCenter);
+        Vector3 planarDelta = Vector3.ProjectOnPlane(desiredGroundCenter - visualCenter, up);
+        character.position += planarDelta + up * (tabletopHeight - currentBottomHeight);
+        Debug.Log(
+            $"[RingCharacterPlacementV2] instance={GetInstanceID()} character={definition.id} " +
+            $"deskXZ=({deskPosition.x:F3},{deskPosition.y:F3}) radius={desiredRadius:F3} " +
+            $"yawOffset={globalCharacterYawOffsetDegrees + definition.forwardYawOffsetDegrees:F1} " +
+            $"worldPosition={character.position:F3}");
     }
 
     private Vector3 GetExpectedObjectCenter(Vector3 up)
@@ -633,8 +1068,13 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
         if (shader == null) shader = Shader.Find("Sprites/Default");
         ringMaterial = new Material(shader) { name = "Scale Placement Ring Material" };
-        ringMaterial.renderQueue = 3100;
+        if (ringMaterial.HasProperty("_ZTest"))
+            ringMaterial.SetFloat("_ZTest", (float)CompareFunction.Always);
+        if (ringMaterial.HasProperty("_ZWrite"))
+            ringMaterial.SetFloat("_ZWrite", 0f);
+        ringMaterial.renderQueue = 4000;
         ring.sharedMaterial = ringMaterial;
+        ring.sortingOrder = short.MaxValue;
     }
 
     private void UpdateRingPose()
@@ -792,6 +1232,22 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
                 Debug.LogWarning($"[ScalePlacementChallenge] Failed to load pattern {pattern.id}: {e.Message}");
             }
         }
+    }
+
+    private void LoadCharacterSettings()
+    {
+        if (!persistCharacterSettings || string.IsNullOrWhiteSpace(characterMultiplierPrefsKeyPrefix))
+            return;
+        EnsureCharacterDefinitions();
+        for (int i = 0; i < ringCharacters.Length; i++)
+        {
+            RingCharacter definition = ringCharacters[i];
+            string key = characterMultiplierPrefsKeyPrefix + definition.id;
+            if (PlayerPrefs.HasKey(key))
+                definition.ringSizeMultiplier = Mathf.Max(0.01f, PlayerPrefs.GetFloat(key, definition.ringSizeMultiplier));
+        }
+        if (!string.IsNullOrWhiteSpace(characterYawPrefsKey) && PlayerPrefs.HasKey(characterYawPrefsKey))
+            globalCharacterYawOffsetDegrees = PlayerPrefs.GetFloat(characterYawPrefsKey, globalCharacterYawOffsetDegrees);
     }
 
     private void SavePatternSettings(Pattern pattern)

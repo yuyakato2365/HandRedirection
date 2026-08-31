@@ -881,6 +881,8 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             (parts[0] != "GET_TARGET_RING_PATTERN" && parts[0] != "SET_TARGET_RING_PATTERN" &&
              parts[0] != "GET_TARGET_RING_SETTINGS" && parts[0] != "SET_TARGET_RING_SETTINGS" &&
              parts[0] != "GET_TARGET_RING_LAYOUT" && parts[0] != "SET_TARGET_RING_POSITION" &&
+             parts[0] != "GET_TARGET_RING_CHARACTERS" && parts[0] != "SET_TARGET_RING_CHARACTER_MULTIPLIER" &&
+             parts[0] != "GET_TARGET_RING_CHARACTER_YAW" && parts[0] != "SET_TARGET_RING_CHARACTER_YAW" &&
              parts[0] != "DISABLE_TARGET_RING_CHALLENGE"))
             return false;
 
@@ -925,6 +927,57 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             SendTargetRingLayoutStatus("A");
             SendTargetRingLayoutStatus("B");
             SendTargetRingLayoutStatus("C");
+            SendAllTargetRingCharacterLayoutStatuses();
+            SendTargetRingCharacterYawStatus();
+            return true;
+        }
+
+        if (parts[0] == "GET_TARGET_RING_CHARACTERS")
+        {
+            if (parts.Length != 1)
+            {
+                SendStatus("ERROR target_ring_characters_format");
+                return true;
+            }
+            SendAllTargetRingCharacterLayoutStatuses();
+            SendTargetRingCharacterYawStatus();
+            return true;
+        }
+
+        if (parts[0] == "GET_TARGET_RING_CHARACTER_YAW")
+        {
+            if (parts.Length != 1)
+            {
+                SendStatus("ERROR target_ring_character_yaw_format");
+                return true;
+            }
+            SendTargetRingCharacterYawStatus();
+            return true;
+        }
+
+        if (parts[0] == "SET_TARGET_RING_CHARACTER_YAW")
+        {
+            if (parts.Length != 2 || !TryParseInvariant(parts[1], out float yawDegrees) ||
+                !scalePlacementChallenge.SetGlobalCharacterYawOffset(yawDegrees))
+            {
+                SendStatus("ERROR target_ring_character_yaw_format");
+                return true;
+            }
+            SendTargetRingCharacterYawStatus();
+            SendAllTargetRingCharacterLayoutStatuses();
+            return true;
+        }
+
+        if (parts[0] == "SET_TARGET_RING_CHARACTER_MULTIPLIER")
+        {
+            if (parts.Length != 3 ||
+                !TryParseInvariant(parts[2], out float multiplier) || multiplier <= 0f || multiplier > 20f ||
+                !scalePlacementChallenge.SetCharacterMultiplier(parts[1], multiplier))
+            {
+                SendStatus("ERROR target_ring_character_multiplier_format");
+                return true;
+            }
+            SendAllTargetRingCharacterLayoutStatuses();
             return true;
         }
 
@@ -940,6 +993,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
                 return true;
             }
             SendTargetRingLayoutStatus(parts[1]);
+            SendAllTargetRingCharacterLayoutStatuses();
             return true;
         }
 
@@ -974,6 +1028,7 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             }
             SendTargetRingSettingsStatus(parts[1]);
             SendTargetRingLayoutStatus(parts[1]);
+            SendAllTargetRingCharacterLayoutStatuses();
             return true;
         }
 
@@ -991,6 +1046,8 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
         }
 
         SendTargetRingStatus();
+        SendAllTargetRingCharacterLayoutStatuses();
+        SendTargetRingCharacterYawStatus();
         return true;
     }
 
@@ -1038,6 +1095,39 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             patternId.ToUpperInvariant(), targetObjectId,
             deskPosition.x, deskPosition.y, radii.x, radii.y);
         Debug.Log($"[TargetRingLayout] {message}");
+        SendStatus(message);
+    }
+
+    private void SendAllTargetRingCharacterLayoutStatuses()
+    {
+        SendTargetRingCharacterLayoutStatus("PANDA");
+        SendTargetRingCharacterLayoutStatus("GORILLA");
+        SendTargetRingCharacterLayoutStatus("ELEPHANT");
+    }
+
+    private void SendTargetRingCharacterYawStatus()
+    {
+        SendStatus(string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "TARGET_RING_CHARACTER_YAW {0:R}",
+            scalePlacementChallenge.GetGlobalCharacterYawOffset()));
+    }
+
+    private void SendTargetRingCharacterLayoutStatus(string characterId)
+    {
+        if (!scalePlacementChallenge.TryGetCharacterLayout(
+                characterId, out string patternId, out Vector2 deskPosition,
+                out float diagramRadius, out float multiplier))
+        {
+            SendStatus($"ERROR target_ring_character_not_found {characterId}");
+            return;
+        }
+        string message = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "TARGET_RING_CHARACTER {0} {1} {2:R} {3:R} {4:R} {5:R}",
+            characterId.ToUpperInvariant(), patternId,
+            deskPosition.x, deskPosition.y, diagramRadius, multiplier);
+        Debug.Log($"[TargetRingCharacter] {message}");
         SendStatus(message);
     }
 
