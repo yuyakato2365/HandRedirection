@@ -401,17 +401,31 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
 
             // Use runtime material instances so imported/shared character assets
             // are not modified. Render after the scene and ignore its depth.
-            Material[] materials = renderer.materials;
+            Shader alwaysOnTopShader = Shader.Find("HandRedirection/Always On Top Unlit");
+            if (alwaysOnTopShader == null)
+                continue;
+            Material[] sourceMaterials = renderer.sharedMaterials;
+            Material[] materials = new Material[sourceMaterials.Length];
             for (int materialIndex = 0; materialIndex < materials.Length; materialIndex++)
             {
-                Material material = materials[materialIndex];
-                if (material == null) continue;
-                if (material.HasProperty("_ZTest"))
-                    material.SetFloat("_ZTest", (float)CompareFunction.Always);
-                if (material.HasProperty("_ZWrite"))
-                    material.SetFloat("_ZWrite", 0f);
-                material.renderQueue = 4000;
+                Material source = sourceMaterials[materialIndex];
+                Material material = new Material(alwaysOnTopShader)
+                {
+                    name = (source != null ? source.name : "Character") + " Always On Top",
+                    renderQueue = 5000
+                };
+                if (source != null)
+                {
+                    Texture texture = source.HasProperty("_BaseMap") ? source.GetTexture("_BaseMap") : source.mainTexture;
+                    material.SetTexture("_BaseMap", texture);
+                    material.SetTextureScale("_BaseMap", source.mainTextureScale);
+                    material.SetTextureOffset("_BaseMap", source.mainTextureOffset);
+                    Color color = source.HasProperty("_BaseColor") ? source.GetColor("_BaseColor") : source.color;
+                    material.SetColor("_BaseColor", color);
+                }
+                materials[materialIndex] = material;
             }
+            renderer.sharedMaterials = materials;
         }
     }
 
@@ -1065,14 +1079,15 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
         ring.startWidth = ringWidth;
         ring.endWidth = ringWidth;
         ring.numCapVertices = 4;
-        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        Shader shader = Shader.Find("HandRedirection/Always On Top Unlit");
+        if (shader == null) shader = Shader.Find("Universal Render Pipeline/Unlit");
         if (shader == null) shader = Shader.Find("Sprites/Default");
         ringMaterial = new Material(shader) { name = "Scale Placement Ring Material" };
         if (ringMaterial.HasProperty("_ZTest"))
             ringMaterial.SetFloat("_ZTest", (float)CompareFunction.Always);
         if (ringMaterial.HasProperty("_ZWrite"))
             ringMaterial.SetFloat("_ZWrite", 0f);
-        ringMaterial.renderQueue = 4000;
+        ringMaterial.renderQueue = 5000;
         ring.sharedMaterial = ringMaterial;
         ring.sortingOrder = short.MaxValue;
     }
