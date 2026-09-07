@@ -111,6 +111,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
     public bool IsChallengeEnabled => challengeEnabled;
 
     private LineRenderer ring;
+    public Renderer RingRenderer => ring;
     private Material ringMaterial;
     private Pattern activePattern;
     private GoGoInteractionController_NoY3.WarpObjectEntry activeEntry;
@@ -397,7 +398,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             renderer.receiveShadows = false;
             renderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
             renderer.allowOcclusionWhenDynamic = false;
-            renderer.sortingOrder = short.MaxValue;
+            renderer.sortingOrder = 30000;
 
             // Use runtime material instances so imported/shared character assets
             // are not modified. Render after the scene and ignore its depth.
@@ -412,7 +413,7 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
                 Material material = new Material(alwaysOnTopShader)
                 {
                     name = (source != null ? source.name : "Character") + " Always On Top",
-                    renderQueue = 5000
+                    renderQueue = 4500
                 };
                 if (source != null)
                 {
@@ -1087,9 +1088,9 @@ public sealed class ScalePlacementChallengeController : MonoBehaviour
             ringMaterial.SetFloat("_ZTest", (float)CompareFunction.Always);
         if (ringMaterial.HasProperty("_ZWrite"))
             ringMaterial.SetFloat("_ZWrite", 0f);
-        ringMaterial.renderQueue = 5000;
+        ringMaterial.renderQueue = 4500;
         ring.sharedMaterial = ringMaterial;
-        ring.sortingOrder = short.MaxValue;
+        ring.sortingOrder = 30000;
     }
 
     private void UpdateRingPose()

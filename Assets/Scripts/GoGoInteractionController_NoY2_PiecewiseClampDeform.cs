@@ -47,6 +47,9 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
     public Transform redirectionOrigin;
     public bool useRedirectionOriginWhenAvailable = false;
     public bool suppressRedirection;
+    [Header("Contact correction comparison")]
+    [Tooltip("Off uses only the base desk expansion mapping, without object-local contact correction. Object positions and scales are unchanged.")]
+    public bool enableObjectContactCorrection = true;
 
     [Header("Desk Mapping")]
     public float deskWidthScale = 1.0f;
@@ -1283,6 +1286,12 @@ public class GoGoInteractionController_NoY3 : MonoBehaviour
         Vector3 pLocal = WorldToLocalForWarp(pointW);
         Vector3 pLocalWarped = LinearWarpLocal(pLocal);
         Vector3 pFW = LocalToWorldForWarp(pLocalWarped);
+
+        if (!enableObjectContactCorrection)
+        {
+            lastSelectedIndex = -1;
+            return pFW;
+        }
 
         List<WarpObjectEntry> active = EnumerateActiveEntries();
         if (active.Count == 0) return pFW;

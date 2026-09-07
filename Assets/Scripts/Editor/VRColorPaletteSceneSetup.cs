@@ -5,18 +5,22 @@ using UnityEngine;
 public static class VRColorPaletteSceneSetup
 {
     [InitializeOnLoadMethod]
-    private static void AutoCreatePaletteAfterCompile()
+    private static void DisablePaletteAfterCompile()
     {
         EditorApplication.delayCall += () =>
         {
             if (EditorApplication.isPlayingOrWillChangePlaymode)
                 return;
-            if (GameObject.Find("VRColorPalettePanel") != null)
-                return;
-            if (!SceneLooksRelevant())
-                return;
-
-            CreateOrUpdateScenePalette(saveScene: false);
+            // Keep the optional palette disabled; never recreate it on compilation.
+            // Also update the open scene without saving unrelated pending edits.
+            foreach (var panel in Object.FindObjectsByType<VRColorPalettePanel>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (!panel.gameObject.scene.IsValid() || !panel.gameObject.activeSelf)
+                    continue;
+                Undo.RecordObject(panel.gameObject, "Disable VR Color Palette");
+                panel.gameObject.SetActive(false);
+                EditorSceneManager.MarkSceneDirty(panel.gameObject.scene);
+            }
         };
     }
 

@@ -4,6 +4,7 @@ Shader "HandRedirection/Always On Top Unlit"
     {
         [MainTexture] _BaseMap("Texture", 2D) = "white" {}
         [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
+        _ForceOpaque("Ignore alpha for opaque source materials", Float) = 0
     }
     SubShader
     {
@@ -41,6 +42,7 @@ Shader "HandRedirection/Always On Top Unlit"
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
+                float _ForceOpaque;
             CBUFFER_END
 
             Varyings Vert(Attributes input)
@@ -56,7 +58,9 @@ Shader "HandRedirection/Always On Top Unlit"
             half4 Frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-                return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv) * _BaseColor;
+                half4 color = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv) * _BaseColor;
+                color.a = lerp(color.a, 1.0h, saturate(_ForceOpaque));
+                return color;
             }
             ENDHLSL
         }

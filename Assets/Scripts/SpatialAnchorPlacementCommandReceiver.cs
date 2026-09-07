@@ -196,6 +196,20 @@ public class SpatialAnchorPlacementCommandReceiver : MonoBehaviour
             return;
 
         string normalized = command.Trim().ToUpperInvariant();
+        if (normalized == "CONTACT_CORRECTION_ON" || normalized == "CONTACT_CORRECTION_OFF")
+        {
+            bool correctionEnabled = normalized == "CONTACT_CORRECTION_ON";
+            foreach (var controller in FindObjectsByType<GoGoInteractionController_NoY3>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                controller.enableObjectContactCorrection = correctionEnabled;
+            SendStatus(normalized);
+            return;
+        }
+        if (normalized == "FOREGROUND_ON" || normalized == "FOREGROUND_OFF")
+        {
+            ForegroundInteractionRenderPriority.SetPriorityEnabled(normalized == "FOREGROUND_ON");
+            SendStatus(normalized);
+            return;
+        }
         if (logCommands)
             Debug.Log($"[SpatialAnchorPlacementCommandReceiver] Command: {normalized}");
 

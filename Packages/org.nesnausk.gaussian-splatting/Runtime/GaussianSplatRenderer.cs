@@ -83,6 +83,10 @@ namespace GaussianSplatting.Runtime
                 if (gs == null || !gs.isActiveAndEnabled || !gs.HasValidAsset || !gs.HasValidRenderSetup)
                     continue;
 
+                // Respect camera layers, including interaction-only overlay cameras.
+                if ((cam.cullingMask & (1 << gs.gameObject.layer)) == 0)
+                    continue;
+
                 m_ActiveSplats.Add((kvp.Key, kvp.Value));
             }
 
